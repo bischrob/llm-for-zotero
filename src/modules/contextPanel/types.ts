@@ -104,6 +104,7 @@ export type ChatAttachment = {
 export type PdfContext = {
   title: string;
   chunks: string[];
+  chunkMeta: PdfChunkMeta[];
   chunkStats: ChunkStat[];
   docFreq: Record<string, number>;
   avgChunkLength: number;
@@ -121,6 +122,30 @@ export type PaperContextRef = {
   attachmentTitle?: string;
   firstCreator?: string;
   year?: string;
+};
+
+export type PdfChunkKind =
+  | "abstract"
+  | "introduction"
+  | "methods"
+  | "results"
+  | "discussion"
+  | "conclusion"
+  | "references"
+  | "figure-caption"
+  | "table-caption"
+  | "appendix"
+  | "body"
+  | "unknown";
+
+export type PdfChunkMeta = {
+  chunkIndex: number;
+  text: string;
+  normalizedText: string;
+  sectionLabel?: string;
+  chunkKind: PdfChunkKind;
+  anchorText?: string;
+  leadingNoiseRemoved?: boolean;
 };
 
 export type ContextAssemblyMode = "full" | "retrieval";
@@ -145,6 +170,10 @@ export type PaperContextCandidate = {
   year?: string;
   chunkIndex: number;
   chunkText: string;
+  sectionLabel?: string;
+  chunkKind?: PdfChunkKind;
+  anchorText?: string;
+  leadingNoiseRemoved?: boolean;
   estimatedTokens: number;
   bm25Score: number;
   embeddingScore: number;

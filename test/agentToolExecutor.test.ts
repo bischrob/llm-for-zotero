@@ -1,4 +1,5 @@
 import { assert } from "chai";
+import { buildChunkMetadata } from "../src/modules/contextPanel/pdfContext";
 import {
   createAgentToolExecutorState,
   executeAgentToolCall,
@@ -42,6 +43,7 @@ describe("agentToolExecutor", function () {
     return {
       title: paper.title,
       chunks,
+      chunkMeta: buildChunkMetadata(chunks),
       chunkStats: [],
       docFreq: {},
       avgChunkLength: 0,

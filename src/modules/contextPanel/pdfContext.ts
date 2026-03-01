@@ -9,12 +9,15 @@ import {
   RETRIEVAL_TOP_K_PER_PAPER,
   STOPWORDS,
 } from "./constants";
+import { formatPaperCitationLabel } from "./paperAttribution";
 import { pdfTextCache, pdfTextLoadingTasks } from "./state";
 import type {
   PdfContext,
   ChunkStat,
   PaperContextRef,
   PaperContextCandidate,
+  PdfChunkMeta,
+  PdfChunkKind,
 } from "./types";
 
 async function cachePDFText(item: Zotero.Item) {
@@ -47,10 +50,12 @@ async function cachePDFText(item: Zotero.Item) {
 
     if (pdfText) {
       const chunks = splitIntoChunks(pdfText, CHUNK_TARGET_LENGTH);
+      const chunkMeta = buildChunkMetadata(chunks);
       const { chunkStats, docFreq, avgChunkLength } = buildChunkIndex(chunks);
       pdfTextCache.set(item.id, {
         title,
         chunks,
+        chunkMeta,
         chunkStats,
         docFreq,
         avgChunkLength,
@@ -61,6 +66,7 @@ async function cachePDFText(item: Zotero.Item) {
       pdfTextCache.set(item.id, {
         title,
         chunks: [],
+        chunkMeta: [],
         chunkStats: [],
         docFreq: {},
         avgChunkLength: 0,
@@ -73,6 +79,7 @@ async function cachePDFText(item: Zotero.Item) {
     pdfTextCache.set(item.id, {
       title: "",
       chunks: [],
+      chunkMeta: [],
       chunkStats: [],
       docFreq: {},
       avgChunkLength: 0,
@@ -138,6 +145,341 @@ function splitIntoChunks(text: string, targetLength: number): string[] {
   }
   pushCurrent();
   return chunks;
+}
+
+type SectionHeadingPattern = {
+  label: string;
+  kind: PdfChunkKind;
+  pattern: RegExp;
+};
+
+type SectionHeadingMatch = {
+  label: string;
+  kind: PdfChunkKind;
+};
+
+const SECTION_HEADING_PATTERNS: SectionHeadingPattern[] = [
+  {
+    label: "Abstract",
+    kind: "abstract",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*abstract\b[:.\s-]*$/i,
+  },
+  {
+    label: "Introduction",
+    kind: "introduction",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*introduction\b[:.\s-]*$/i,
+  },
+  {
+    label: "Related Work",
+    kind: "introduction",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*related work\b[:.\s-]*$/i,
+  },
+  {
+    label: "Methods",
+    kind: "methods",
+    pattern:
+      /^(?:\d+(?:\.\d+)*)?\s*(?:methods?|methodology|materials and methods)\b[:.\s-]*$/i,
+  },
+  {
+    label: "Results",
+    kind: "results",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*results?\b[:.\s-]*$/i,
+  },
+  {
+    label: "Discussion",
+    kind: "discussion",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*discussion\b[:.\s-]*$/i,
+  },
+  {
+    label: "Conclusion",
+    kind: "conclusion",
+    pattern: /^(?:\d+(?:\.\d+)*)?\s*conclusions?\b[:.\s-]*$/i,
+  },
+  {
+    label: "Appendix",
+    kind: "appendix",
+    pattern:
+      /^(?:\d+(?:\.\d+)*)?\s*(?:appendix|supplement(?:ary)? materials?)\b[:.\s-]*$/i,
+  },
+  {
+    label: "References",
+    kind: "references",
+    pattern:
+      /^(?:\d+(?:\.\d+)*)?\s*(?:references|bibliography|works cited|literature cited|references and notes)\b[:.\s-]*$/i,
+  },
+];
+
+const FIGURE_CAPTION_PATTERN =
+  /^(?:\d+\s+)?(?:fig(?:ure)?\.?)\s*\d+[a-z]?(?:\s*[:.)-]\s*|\s+)/i;
+const TABLE_CAPTION_PATTERN =
+  /^(?:\d+\s+)?table\s*\d+[a-z]?(?:\s*[:.)-]\s*|\s+)/i;
+
+function normalizeEvidenceText(value: string): string {
+  return sanitizePdfText(value).replace(/\s+/g, " ").trim();
+}
+
+function sanitizePdfText(value: string): string {
+  return (value || "").replace(/\r\n?/g, "\n").trim();
+}
+
+function matchSectionHeading(
+  chunkText: string,
+): SectionHeadingMatch | undefined {
+  const lines = sanitizePdfText(chunkText)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  for (const line of lines) {
+    for (const heading of SECTION_HEADING_PATTERNS) {
+      if (heading.pattern.test(line)) {
+        return { label: heading.label, kind: heading.kind };
+      }
+    }
+    if (line.length > 100 || /[.!?]/.test(line)) {
+      break;
+    }
+  }
+  const normalized = normalizeEvidenceText(chunkText);
+  for (const heading of SECTION_HEADING_PATTERNS) {
+    const inlinePattern = new RegExp(
+      `^(?:\\d+(?:\\.\\d+)*)?\\s*${heading.label.replace(/\s+/g, "\\s+")}\\b[:.\\s-]+`,
+      "i",
+    );
+    if (inlinePattern.test(normalized)) {
+      return { label: heading.label, kind: heading.kind };
+    }
+  }
+  return undefined;
+}
+
+function trimLeadingSectionHeading(
+  chunkText: string,
+  sectionLabel: string | undefined,
+): string {
+  if (!sectionLabel) return sanitizePdfText(chunkText);
+  const trimmed = sanitizePdfText(chunkText);
+  const lines = trimmed.split(/\n+/);
+  const firstLine = lines[0]?.trim() || "";
+  const headingPattern = new RegExp(
+    `^(?:\\d+(?:\\.\\d+)*)?\\s*${sectionLabel.replace(/\s+/g, "\\s+")}\\b[:.\\s-]*$`,
+    "i",
+  );
+  if (headingPattern.test(firstLine)) {
+    return lines.slice(1).join(" ").trim() || trimmed;
+  }
+  const inlinePattern = new RegExp(
+    `^(?:\\d+(?:\\.\\d+)*)?\\s*${sectionLabel.replace(/\s+/g, "\\s+")}\\b[:.\\s-]+`,
+    "i",
+  );
+  return trimmed.replace(inlinePattern, "").trim() || trimmed;
+}
+
+function looksLikeReferenceEntry(text: string): boolean {
+  const normalized = normalizeEvidenceText(text);
+  if (!normalized) return false;
+  const tokenCount = normalized.split(/\s+/).length;
+  if (tokenCount < 4) return false;
+  return (
+    /\b(?:19|20)\d{2}[a-z]?\b/.test(normalized) ||
+    /\bdoi\b/i.test(normalized) ||
+    /https?:\/\//i.test(normalized) ||
+    /^\[\d+\]/.test(normalized) ||
+    /^\d{1,3}[.)]/.test(normalized)
+  );
+}
+
+function looksLikeCitationList(text: string): boolean {
+  const normalized = normalizeEvidenceText(text);
+  if (!normalized) return false;
+  return (
+    looksLikeReferenceEntry(normalized) ||
+    /^[A-Z][A-Za-z'`.-]+(?:,\s*[A-Z][A-Za-z'`.-]+){2,}.*\b(?:19|20)\d{2}[a-z]?\b/.test(
+      normalized,
+    )
+  );
+}
+
+function looksLikeFigureCaption(text: string): boolean {
+  return FIGURE_CAPTION_PATTERN.test(sanitizePdfText(text));
+}
+
+function looksLikeTableCaption(text: string): boolean {
+  return TABLE_CAPTION_PATTERN.test(sanitizePdfText(text));
+}
+
+function cleanLeadingEvidenceNoise(text: string, chunkKind: PdfChunkKind): {
+  text: string;
+  removedLeadingNoise: boolean;
+} {
+  const original = normalizeEvidenceText(text);
+  let cleaned = original;
+  if (chunkKind === "figure-caption") {
+    cleaned = cleaned.replace(FIGURE_CAPTION_PATTERN, "").trim();
+  } else if (chunkKind === "table-caption") {
+    cleaned = cleaned.replace(TABLE_CAPTION_PATTERN, "").trim();
+  }
+  cleaned = cleaned.replace(/^[-–—:;,.()\[\]]+\s*/, "").trim();
+  cleaned = cleaned.replace(/^(?:\d{1,3}\s+){1,3}(?=[A-Za-z])/u, "").trim();
+  cleaned = cleaned.replace(
+    /^(?:page|p)\s*\d{1,4}(?:\s+of\s+\d{1,4})?\s*/i,
+    "",
+  );
+  cleaned = cleaned.replace(/^[-–—:;,.()\[\]]+\s*/, "").trim();
+  return {
+    text: cleaned || original,
+    removedLeadingNoise: Boolean(cleaned && cleaned !== original),
+  };
+}
+
+function buildEvidenceAnchorFromText(text: string): string {
+  const normalized = normalizeEvidenceText(text);
+  if (!normalized) return "";
+  const maxChars = 120;
+  const sentenceBoundary = normalized.search(/[.!?](?:\s|$)/);
+  if (sentenceBoundary >= 25 && sentenceBoundary < maxChars) {
+    return normalized.slice(0, sentenceBoundary + 1).trim();
+  }
+  if (normalized.length <= maxChars) return normalized;
+  const boundary = normalized.lastIndexOf(" ", maxChars);
+  const truncated =
+    boundary >= 40
+      ? normalized.slice(0, boundary).trim()
+      : normalized.slice(0, maxChars).trim();
+  return `${truncated}...`;
+}
+
+function resolveChunkKind(params: {
+  chunkText: string;
+  normalizedText: string;
+  sectionHeading?: SectionHeadingMatch;
+}): PdfChunkKind {
+  const { chunkText, normalizedText, sectionHeading } = params;
+  if (sectionHeading?.kind) {
+    return sectionHeading.kind;
+  }
+  if (looksLikeReferenceEntry(normalizedText) || looksLikeCitationList(normalizedText)) {
+    return "references";
+  }
+  if (looksLikeFigureCaption(chunkText)) {
+    return "figure-caption";
+  }
+  if (looksLikeTableCaption(chunkText)) {
+    return "table-caption";
+  }
+  if (/\bappendix\b/i.test(normalizedText)) {
+    return "appendix";
+  }
+  return normalizedText ? "body" : "unknown";
+}
+
+function getSupportLevelLabel(chunkKind: PdfChunkKind | undefined): string {
+  switch (chunkKind) {
+    case "abstract":
+    case "results":
+    case "discussion":
+    case "conclusion":
+      return "likely direct";
+    case "methods":
+    case "introduction":
+    case "body":
+    case "figure-caption":
+    case "table-caption":
+      return "contextual";
+    case "references":
+      return "background only";
+    case "appendix":
+      return "weak or peripheral";
+    default:
+      return "contextual";
+  }
+}
+
+export function buildChunkMetadata(chunks: string[]): PdfChunkMeta[] {
+  const chunkMeta: PdfChunkMeta[] = [];
+  let activeSection: SectionHeadingMatch | undefined;
+  for (const [chunkIndex, chunkText] of chunks.entries()) {
+    const explicitSection = matchSectionHeading(chunkText);
+    if (explicitSection) {
+      activeSection = explicitSection;
+    }
+    const normalizedText = normalizeEvidenceText(chunkText);
+    const sectionHeading = explicitSection || activeSection;
+    const chunkKind = resolveChunkKind({
+      chunkText,
+      normalizedText,
+      sectionHeading,
+    });
+    const textWithoutHeading = explicitSection
+      ? trimLeadingSectionHeading(chunkText, explicitSection.label)
+      : sanitizePdfText(chunkText);
+    const cleaned = cleanLeadingEvidenceNoise(textWithoutHeading, chunkKind);
+    chunkMeta.push({
+      chunkIndex,
+      text: chunkText,
+      normalizedText,
+      sectionLabel: sectionHeading?.label,
+      chunkKind,
+      anchorText: buildEvidenceAnchorFromText(cleaned.text) || undefined,
+      leadingNoiseRemoved: cleaned.removedLeadingNoise || undefined,
+    });
+  }
+  return chunkMeta;
+}
+
+function buildCompactPaperSourceLabel(ref: PaperContextRef): string {
+  const verbose = normalizeEvidenceText(formatPaperCitationLabel(ref));
+  if (verbose && !/^paper\b/i.test(verbose)) {
+    return verbose
+      .replace(/\set al\.,?/gi, "")
+      .replace(/,/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  if (ref.citationKey) {
+    return normalizeEvidenceText(ref.citationKey);
+  }
+  return /^paper\b/i.test(verbose) ? verbose : "Paper";
+}
+
+function buildEvidenceAnchor(
+  chunkText: string,
+  sectionLabel?: string,
+  chunkKind: PdfChunkKind = "body",
+  fallbackAnchor?: string,
+): string {
+  if (fallbackAnchor) {
+    return fallbackAnchor;
+  }
+  const textWithoutHeading = trimLeadingSectionHeading(chunkText, sectionLabel);
+  const cleaned = cleanLeadingEvidenceNoise(textWithoutHeading, chunkKind);
+  return buildEvidenceAnchorFromText(cleaned.text);
+}
+
+export function formatSuggestedEvidenceCitation(
+  paper: PaperContextRef,
+  candidate: Pick<
+    PaperContextCandidate,
+    "chunkText" | "sectionLabel" | "chunkKind" | "anchorText"
+  >,
+): string {
+  const citationParts = [buildCompactPaperSourceLabel(paper)];
+  const sectionLabel =
+    candidate.sectionLabel ||
+    matchSectionHeading(candidate.chunkText)?.label;
+  if (sectionLabel) {
+    citationParts.push(sectionLabel);
+  }
+  const anchor = buildEvidenceAnchor(
+    candidate.chunkText,
+    sectionLabel,
+    candidate.chunkKind || "body",
+    candidate.anchorText,
+  );
+  if (anchor) {
+    citationParts.push(`"${anchor}"`);
+  }
+  return `(${citationParts.join(", ")})`;
 }
 
 function tokenizeText(text: string): string[] {
@@ -382,6 +724,82 @@ function shouldTryEmbeddings(overrides?: {
   );
 }
 
+function queryMentionsFiguresOrTables(question: string): boolean {
+  return /\b(?:figure|fig\.?|table|caption)\b/i.test(question);
+}
+
+function queryLooksMethodFocused(question: string): boolean {
+  return /\b(?:method|methods|methodology|training|implementation|algorithm|setup|dataset|protocol|procedure|hyperparameter)\b/i.test(
+    question,
+  );
+}
+
+function scoreEvidenceHeuristics(params: {
+  candidate: PaperContextCandidate;
+  question: string;
+}): number {
+  const { candidate, question } = params;
+  const chunkText = normalizeEvidenceText(candidate.chunkText);
+  const wordCount = chunkText ? chunkText.split(/\s+/).length : 0;
+  const wantsVisuals = queryMentionsFiguresOrTables(question);
+  const wantsMethods = queryLooksMethodFocused(question);
+  let score = 0;
+
+  switch (candidate.chunkKind) {
+    case "abstract":
+      score += 0.9;
+      break;
+    case "results":
+      score += 1.2;
+      break;
+    case "discussion":
+      score += 0.95;
+      break;
+    case "conclusion":
+      score += 0.8;
+      break;
+    case "methods":
+      score += wantsMethods ? 0.2 : -0.2;
+      break;
+    case "introduction":
+      score += 0.2;
+      break;
+    case "figure-caption":
+    case "table-caption":
+      score += wantsVisuals ? -0.1 : -1.1;
+      break;
+    case "appendix":
+      score -= 1.6;
+      break;
+    case "references":
+      score -= 2.4;
+      break;
+    case "body":
+      score += 0.1;
+      break;
+    default:
+      score -= 0.1;
+      break;
+  }
+
+  if (wordCount > 0 && wordCount < 7) {
+    score -= 0.7;
+  } else if (wordCount > 0 && wordCount < 12) {
+    score -= 0.25;
+  }
+
+  if (looksLikeCitationList(chunkText)) {
+    score -= 1.3;
+  }
+  if (candidate.leadingNoiseRemoved && wordCount < 16) {
+    score -= 0.15;
+  }
+  if (!candidate.anchorText) {
+    score -= 0.25;
+  }
+  return score;
+}
+
 export async function buildPaperRetrievalCandidates(
   paperContext: PaperContextRef,
   pdfContext: PdfContext | undefined,
@@ -389,11 +807,17 @@ export async function buildPaperRetrievalCandidates(
   apiOverrides?: { apiBase?: string; apiKey?: string },
   options?: {
     topK?: number;
+    mode?: "general" | "evidence";
   },
 ): Promise<PaperContextCandidate[]> {
   if (!pdfContext) return [];
   const { chunks, chunkStats, docFreq, avgChunkLength } = pdfContext;
   if (!chunks.length || !chunkStats.length) return [];
+  const chunkMeta =
+    Array.isArray(pdfContext.chunkMeta) &&
+    pdfContext.chunkMeta.length === chunks.length
+      ? pdfContext.chunkMeta
+      : buildChunkMetadata(chunks);
 
   const topK = Number.isFinite(options?.topK)
     ? Math.max(1, Math.floor(options?.topK as number))
@@ -426,40 +850,48 @@ export async function buildPaperRetrievalCandidates(
 
   const bm25Weight = embedNorm ? HYBRID_WEIGHT_BM25 : 1;
   const embedWeight = embedNorm ? HYBRID_WEIGHT_EMBEDDING : 0;
+  const retrievalMode = options?.mode || "general";
 
   const scored = chunkStats.map((chunk, idx) => {
     const bm25Score = bm25Norm[idx] || 0;
     const embeddingScore = embedNorm ? embedNorm[idx] || 0 : 0;
     const hybridScore = bm25Score * bm25Weight + embeddingScore * embedWeight;
-    return {
-      index: chunk.index,
+    const meta = chunkMeta[chunk.index];
+    const candidate: PaperContextCandidate = {
+      paperKey: buildPaperKey(paperContext),
+      itemId: paperContext.itemId,
+      contextItemId: paperContext.contextItemId,
+      title: paperContext.title,
+      citationKey: paperContext.citationKey,
+      firstCreator: paperContext.firstCreator,
+      year: paperContext.year,
+      chunkIndex: chunk.index,
       chunkText: chunks[chunk.index],
+      sectionLabel: meta?.sectionLabel,
+      chunkKind: meta?.chunkKind,
+      anchorText: meta?.anchorText,
+      leadingNoiseRemoved: meta?.leadingNoiseRemoved,
+      estimatedTokens: Math.max(1, estimateTextTokens(chunks[chunk.index])),
       bm25Score,
       embeddingScore,
       hybridScore,
     };
+    const evidenceScore =
+      retrievalMode === "evidence"
+        ? hybridScore + scoreEvidenceHeuristics({ candidate, question })
+        : hybridScore;
+    return {
+      candidate,
+      score: evidenceScore,
+    };
   });
 
   scored.sort((a, b) => {
-    if (b.hybridScore !== a.hybridScore) return b.hybridScore - a.hybridScore;
-    return a.index - b.index;
+    if (b.score !== a.score) return b.score - a.score;
+    return a.candidate.chunkIndex - b.candidate.chunkIndex;
   });
 
-  return scored.slice(0, topK).map((entry) => ({
-    paperKey: buildPaperKey(paperContext),
-    itemId: paperContext.itemId,
-    contextItemId: paperContext.contextItemId,
-    title: paperContext.title,
-    citationKey: paperContext.citationKey,
-    firstCreator: paperContext.firstCreator,
-    year: paperContext.year,
-    chunkIndex: entry.index,
-    chunkText: entry.chunkText,
-    estimatedTokens: Math.max(1, estimateTextTokens(entry.chunkText)),
-    bm25Score: entry.bm25Score,
-    embeddingScore: entry.embeddingScore,
-    hybridScore: entry.hybridScore,
-  }));
+  return scored.slice(0, topK).map((entry) => entry.candidate);
 }
 
 export function renderEvidencePack(params: {
@@ -484,7 +916,18 @@ export function renderEvidencePack(params: {
     byPaper.set(candidate.paperKey, list);
   }
 
-  const blocks: string[] = [];
+  const blocks: string[] = [
+    [
+      "Retrieved Evidence:",
+      "",
+      'Use the suggested citations below when attributing evidence in the answer.',
+      'Prefer citations like (Zheng 2026, Abstract, "Despite global representational drift...").',
+      "Use only these snippets as evidence.",
+      "Do not cite raw chunk ids.",
+      "Do not use snippets from references as empirical evidence.",
+      "If support is weak or indirect, say so instead of overstating the claim.",
+    ].join("\n"),
+  ];
   for (const [paperIndex, paper] of papers.entries()) {
     const paperKey = buildPaperKey(paper);
     const paperCandidates = byPaper.get(paperKey) || [];
@@ -494,14 +937,62 @@ export function renderEvidencePack(params: {
     lines.push(...formatPaperMetadataLines(paper));
     lines.push("", "Evidence:");
     for (const candidate of paperCandidates) {
-      const label = `[P${paperIndex + 1}-C${candidate.chunkIndex + 1}]`;
-      lines.push(label);
+      lines.push(
+        `Suggested citation: ${formatSuggestedEvidenceCitation(
+          paper,
+          candidate,
+        )}`,
+      );
       lines.push(candidate.chunkText);
       lines.push("");
     }
     blocks.push(lines.join("\n").trimEnd());
   }
 
-  if (!blocks.length) return "";
-  return `Retrieved Evidence:\n\n${blocks.join("\n\n---\n\n")}`;
+  if (blocks.length <= 1) return "";
+  return blocks.join("\n\n---\n\n");
+}
+
+function buildClaimEvidenceExcerpt(candidate: PaperContextCandidate): string {
+  const baseText = normalizeEvidenceText(candidate.chunkText);
+  if (!baseText) return "";
+  const cleaned = cleanLeadingEvidenceNoise(
+    trimLeadingSectionHeading(baseText, candidate.sectionLabel),
+    candidate.chunkKind || "body",
+  ).text;
+  const maxChars = 280;
+  if (cleaned.length <= maxChars) return cleaned;
+  const boundary = cleaned.lastIndexOf(" ", maxChars);
+  const truncated =
+    boundary >= 120 ? cleaned.slice(0, boundary).trim() : cleaned.slice(0, maxChars).trim();
+  return `${truncated}...`;
+}
+
+export function renderClaimEvidencePack(params: {
+  paper: PaperContextRef;
+  candidates: PaperContextCandidate[];
+}): string {
+  const { paper, candidates } = params;
+  if (!candidates.length) return "";
+  const lines = [
+    "Claim Evidence:",
+    "",
+    "Use only the evidence snippets below when assessing the claim.",
+    "Do not treat references or background citations as direct empirical evidence.",
+    "If the evidence is indirect or mixed, say so explicitly.",
+    "",
+  ];
+  candidates.forEach((candidate, index) => {
+    lines.push(`Evidence snippet ${index + 1}`);
+    lines.push(
+      `Support level: ${getSupportLevelLabel(candidate.chunkKind).toLowerCase()}`,
+    );
+    lines.push(`Section: ${candidate.sectionLabel || "Unlabeled body text"}`);
+    lines.push(
+      `Suggested citation: ${formatSuggestedEvidenceCitation(paper, candidate)}`,
+    );
+    lines.push(`Excerpt: ${buildClaimEvidenceExcerpt(candidate)}`);
+    lines.push("");
+  });
+  return lines.join("\n").trimEnd();
 }

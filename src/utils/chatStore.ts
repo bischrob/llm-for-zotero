@@ -36,6 +36,9 @@ export type StoredChatMessage = {
     contentHash?: string;
   }>;
   modelName?: string;
+  agentStatusText?: string;
+  agentTraceText?: string;
+  agentOpen?: boolean;
   reasoningSummary?: string;
   reasoningDetails?: string;
 };
@@ -163,6 +166,9 @@ export async function initChatStore(): Promise<void> {
         screenshot_images TEXT,
         attachments_json TEXT,
         model_name TEXT,
+        agent_status_text TEXT,
+        agent_trace_text TEXT,
+        agent_open INTEGER,
         reasoning_summary TEXT,
         reasoning_details TEXT
       )`,
@@ -245,6 +251,33 @@ export async function initChatStore(): Promise<void> {
          ADD COLUMN attachments_json TEXT`,
       );
     }
+    const hasAgentStatusTextColumn = Boolean(
+      columns?.some((column) => column?.name === "agent_status_text"),
+    );
+    if (!hasAgentStatusTextColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN agent_status_text TEXT`,
+      );
+    }
+    const hasAgentTraceTextColumn = Boolean(
+      columns?.some((column) => column?.name === "agent_trace_text"),
+    );
+    if (!hasAgentTraceTextColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN agent_trace_text TEXT`,
+      );
+    }
+    const hasAgentOpenColumn = Boolean(
+      columns?.some((column) => column?.name === "agent_open"),
+    );
+    if (!hasAgentOpenColumn) {
+      await Zotero.DB.queryAsync(
+        `ALTER TABLE ${CHAT_MESSAGES_TABLE}
+         ADD COLUMN agent_open INTEGER`,
+      );
+    }
 
     await Zotero.DB.queryAsync(
       `CREATE INDEX IF NOT EXISTS ${CHAT_MESSAGES_INDEX}
@@ -322,6 +355,9 @@ export async function loadConversation(
             screenshot_images AS screenshotImages,
             attachments_json AS attachmentsJson,
             model_name AS modelName,
+            agent_status_text AS agentStatusText,
+            agent_trace_text AS agentTraceText,
+            agent_open AS agentOpen,
             reasoning_summary AS reasoningSummary,
             reasoning_details AS reasoningDetails
      FROM ${CHAT_MESSAGES_TABLE}
@@ -342,6 +378,9 @@ export async function loadConversation(
         screenshotImages?: unknown;
         attachmentsJson?: unknown;
         modelName?: unknown;
+        agentStatusText?: unknown;
+        agentTraceText?: unknown;
+        agentOpen?: unknown;
         reasoningSummary?: unknown;
         reasoningDetails?: unknown;
       }>
@@ -542,6 +581,22 @@ export async function loadConversation(
       screenshotImages,
       attachments,
       modelName: typeof row.modelName === "string" ? row.modelName : undefined,
+      agentStatusText:
+        typeof row.agentStatusText === "string"
+          ? row.agentStatusText
+          : undefined,
+      agentTraceText:
+        typeof row.agentTraceText === "string"
+          ? row.agentTraceText
+          : undefined,
+      agentOpen:
+        typeof row.agentOpen === "boolean"
+          ? row.agentOpen
+          : typeof row.agentOpen === "number"
+            ? row.agentOpen !== 0
+            : row.agentOpen === "0" || row.agentOpen === "1"
+              ? row.agentOpen === "1"
+            : undefined,
       reasoningSummary:
         typeof row.reasoningSummary === "string"
           ? row.reasoningSummary
@@ -603,8 +658,8 @@ export async function appendMessage(
     : [];
   await Zotero.DB.queryAsync(
     `INSERT INTO ${CHAT_MESSAGES_TABLE}
-      (conversation_key, role, text, timestamp, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, screenshot_images, attachments_json, model_name, reasoning_summary, reasoning_details)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (conversation_key, role, text, timestamp, selected_text, selected_texts_json, selected_text_sources_json, selected_text_paper_contexts_json, paper_contexts_json, screenshot_images, attachments_json, model_name, agent_status_text, agent_trace_text, agent_open, reasoning_summary, reasoning_details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedKey,
       message.role,
@@ -620,6 +675,13 @@ export async function appendMessage(
       screenshotImages.length ? JSON.stringify(screenshotImages) : null,
       attachments.length ? JSON.stringify(attachments) : null,
       message.modelName || null,
+      message.agentStatusText || null,
+      message.agentTraceText || null,
+      typeof message.agentOpen === "boolean"
+        ? message.agentOpen
+          ? 1
+          : 0
+        : null,
       message.reasoningSummary || null,
       message.reasoningDetails || null,
     ],
@@ -722,7 +784,14 @@ export async function updateLatestAssistantMessage(
   conversationKey: number,
   message: Pick<
     StoredChatMessage,
-    "text" | "timestamp" | "modelName" | "reasoningSummary" | "reasoningDetails"
+    | "text"
+    | "timestamp"
+    | "modelName"
+    | "agentStatusText"
+    | "agentTraceText"
+    | "agentOpen"
+    | "reasoningSummary"
+    | "reasoningDetails"
   >,
 ): Promise<void> {
   const normalizedKey = normalizeConversationKey(conversationKey);
@@ -734,6 +803,9 @@ export async function updateLatestAssistantMessage(
      SET text = ?,
          timestamp = ?,
          model_name = ?,
+         agent_status_text = ?,
+         agent_trace_text = ?,
+         agent_open = ?,
          reasoning_summary = ?,
          reasoning_details = ?
      WHERE id = (
@@ -747,6 +819,13 @@ export async function updateLatestAssistantMessage(
       message.text || "",
       Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now(),
       message.modelName || null,
+      message.agentStatusText || null,
+      message.agentTraceText || null,
+      typeof message.agentOpen === "boolean"
+        ? message.agentOpen
+          ? 1
+          : 0
+        : null,
       message.reasoningSummary || null,
       message.reasoningDetails || null,
       normalizedKey,

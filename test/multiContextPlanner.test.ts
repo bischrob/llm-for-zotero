@@ -5,7 +5,7 @@ import {
   resolveMultiContextPlan,
   selectContextAssemblyMode,
 } from "../src/modules/contextPanel/multiContextPlanner";
-import { buildPaperKey } from "../src/modules/contextPanel/pdfContext";
+import { buildChunkMetadata, buildPaperKey } from "../src/modules/contextPanel/pdfContext";
 import type {
   ChunkStat,
   PaperContextRef,
@@ -44,6 +44,7 @@ function buildPdfContext(title: string, chunks: string[]): PdfContext {
   return {
     title,
     chunks,
+    chunkMeta: buildChunkMetadata(chunks),
     chunkStats,
     docFreq,
     avgChunkLength,
@@ -113,8 +114,11 @@ describe("multiContextPlanner", function () {
     });
     assert.isAtLeast(result.selectedChunkCount, 3);
     assert.isAtLeast(result.selectedPaperCount, 2);
-    assert.include(result.contextText, "[P1-");
-    assert.include(result.contextText, "[P2-");
+    assert.include(result.contextText, "Retrieved Evidence:");
+    assert.include(result.contextText, "Paper 1");
+    assert.include(result.contextText, "Paper 2");
+    assert.include(result.contextText, "Suggested citation:");
+    assert.notInclude(result.contextText, "[P1-");
   });
 
   it("assembles full multi-paper context blocks", function () {

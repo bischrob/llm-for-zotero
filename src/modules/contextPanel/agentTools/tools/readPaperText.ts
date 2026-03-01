@@ -3,42 +3,18 @@ import {
   buildTruncatedFullPaperContext,
   ensurePDFTextCached,
 } from "../../pdfContext";
+import { validateSinglePaperToolCall } from "./shared";
 import type {
   AgentToolCall,
   AgentToolExecutionContext,
   AgentToolExecutionResult,
-  AgentToolTarget,
   ResolvedAgentToolTarget,
 } from "../types";
-
-function normalizeTarget(target: AgentToolTarget | undefined): AgentToolTarget | null {
-  if (!target) return null;
-  switch (target.scope) {
-    case "active-paper":
-      return { scope: "active-paper" };
-    case "selected-paper":
-    case "pinned-paper":
-    case "recent-paper":
-    case "retrieved-paper": {
-      const parsed = Math.floor(Number(target.index));
-      if (!Number.isFinite(parsed) || parsed < 1) return null;
-      return { scope: target.scope, index: parsed };
-    }
-    default:
-      return null;
-  }
-}
 
 export function validateReadPaperTextCall(
   call: AgentToolCall,
 ): AgentToolCall | null {
-  if (call.name !== "read_paper_text") return null;
-  const normalizedTarget = normalizeTarget(call.target);
-  if (!normalizedTarget) return null;
-  return {
-    name: "read_paper_text",
-    target: normalizedTarget,
-  };
+  return validateSinglePaperToolCall("read_paper_text", call);
 }
 
 export async function executeReadPaperTextCall(

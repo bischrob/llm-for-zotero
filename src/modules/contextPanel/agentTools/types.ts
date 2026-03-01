@@ -1,6 +1,9 @@
 import type { PaperContextRef } from "../types";
 
-export type AgentToolName = "read_paper_text";
+export type AgentToolName =
+  | "read_paper_text"
+  | "find_claim_evidence"
+  | "read_references";
 
 export type AgentToolTarget =
   | { scope: "active-paper" }

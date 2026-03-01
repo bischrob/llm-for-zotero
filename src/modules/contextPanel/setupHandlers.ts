@@ -2679,8 +2679,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       section.entries.push(entry);
       sectionEntries.set(entry.section, section);
     }
-    const orderedSections = Array.from(sectionEntries.entries())
-      .map(([sectionKey, section]) => {
+    const orderedSections = (["paper", "open"] as const)
+      .map((sectionKey) => {
+        const section = sectionEntries.get(sectionKey);
+        if (!section) return null;
         const latestActivity = section.entries.reduce(
           (max, entry) => Math.max(max, entry.lastActivityAt || 0),
           0,
@@ -2716,16 +2718,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           topMatchCount,
         };
       })
-      .sort((a, b) => {
-        if (searchActive && b.topMatchCount !== a.topMatchCount) {
-          return b.topMatchCount - a.topMatchCount;
-        }
-        if (b.latestActivity !== a.latestActivity) {
-          return b.latestActivity - a.latestActivity;
-        }
-        if (a.sectionKey === b.sectionKey) return 0;
-        return a.sectionKey === "paper" ? -1 : 1;
-      });
+      .filter(
+        (
+          section,
+        ): section is {
+          sectionKey: "paper" | "open";
+          title: string;
+          entries: ConversationHistoryEntry[];
+          latestActivity: number;
+          topMatchCount: number;
+        } => Boolean(section),
+      );
 
     for (const section of orderedSections) {
       const expanded = normalizedSearchQuery
