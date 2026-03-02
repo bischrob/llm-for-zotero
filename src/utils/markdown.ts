@@ -326,10 +326,47 @@ function splitIntoBlocks(text: string): TextBlock[] {
   return blocks;
 }
 
+/**
+ * Pre-process raw markdown to insert line breaks before block-level markers
+ * (headers, blockquotes) that the model emitted mid-line —
+ * e.g. `...drift. (Zheng et al., 2026) ### 2. In the Results`
+ *
+ * For headers (`#{1,4} `): triggers whenever the marker appears mid-line
+ * after any non-newline character followed by whitespace.  Multi-hash
+ * headers (`## `, `### `, `#### `) are unambiguous markers that virtually
+ * never appear as legitimate inline text.
+ *
+ * For blockquotes (`> `): triggers only after sentence-ending or
+ * citation-ending punctuation ( `.` `!` `?` `:` `)` `]` `"` ) to avoid
+ * splitting comparison operators like `x > 5`.
+ */
+export function normalizeBlockBoundaries(text: string): string {
+  let result = text;
+
+  // Header markers (#{1,4} ) mid-line after any content + whitespace.
+  // Safe because #{1,4} followed by a space is an unambiguous header marker
+  // and almost never appears as inline text outside code blocks (which are
+  // already extracted before this function is called).
+  result = result.replace(
+    /([^\n])([ \t]+)(#{1,4} )/g,
+    "$1\n\n$3",
+  );
+
+  // Blockquote markers (> ) after sentence / citation-ending punctuation.
+  // More conservative than headers because `>` is common in comparisons.
+  result = result.replace(
+    /([.!?:)\]"])([ \t]+)(> )/g,
+    "$1\n\n$3",
+  );
+
+  return result;
+}
+
 /** Split non-code text into blocks by blank lines and structure */
 function splitTextBlocks(text: string): TextBlock[] {
+  const normalized = normalizeBlockBoundaries(text);
   const blocks: TextBlock[] = [];
-  const lines = text.split(/\r?\n/);
+  const lines = normalized.split(/\r?\n/);
 
   let i = 0;
   while (i < lines.length) {

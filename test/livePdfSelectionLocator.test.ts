@@ -2,6 +2,10 @@ import { assert } from "chai";
 import {
   locateQuoteInPageTexts,
   locateSelectionInPageTexts,
+  stripBoundaryEllipsis,
+  splitQuoteAtEllipsis,
+  buildRawPrefixQueries,
+  locateQuoteByRawPrefixInPages,
 } from "../src/modules/contextPanel/livePdfSelectionLocator";
 
 describe("livePdfSelectionLocator", function () {
@@ -104,7 +108,7 @@ describe("livePdfSelectionLocator", function () {
     assert.isNull(result.computedPageIndex);
   });
 
-  it("resolves a truncated long quote using internal anchors", function () {
+  it("resolves a truncated long quote using prefix-suffix matching", function () {
     const pages = [
       {
         pageIndex: 0,
@@ -127,7 +131,7 @@ describe("livePdfSelectionLocator", function () {
     assert.equal(result.computedPageIndex, 23);
   });
 
-  it("keeps quote matches ambiguous when anchors support two pages equally", function () {
+  it("keeps quote matches ambiguous when exact text appears on multiple pages", function () {
     const duplicatedPassage =
       "learning reduces overlap only approximately leaving residual responses in the perpendicular to the original representation subspace directions";
     const result = locateQuoteInPageTexts(
@@ -150,7 +154,7 @@ describe("livePdfSelectionLocator", function () {
     assert.deepEqual(result.matchedPageIndexes, [4, 9]);
   });
 
-  it("resolves quotes when math-like fragments are omitted from the page text", function () {
+  it("returns not-found for quotes with math fragments absent from the page text", function () {
     const result = locateQuoteInPageTexts(
       [
         {
@@ -162,8 +166,9 @@ describe("livePdfSelectionLocator", function () {
       6,
     );
 
-    assert.equal(result.status, "resolved");
-    assert.equal(result.computedPageIndex, 6);
+    // Without anchor-based voting, the search cannot bridge math
+    // fragments that the LLM added but are not in the page text.
+    assert.equal(result.status, "not-found");
   });
 
   it("resolves punctuation-heavy truncated classifier quotes", function () {
@@ -180,5 +185,199 @@ describe("livePdfSelectionLocator", function () {
 
     assert.equal(result.status, "resolved");
     assert.equal(result.computedPageIndex, 1);
+  });
+});
+
+describe("stripBoundaryEllipsis", function () {
+  it("strips leading three-dot ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("...Preparatory activity is thought to provide top-down signals"),
+      "Preparatory activity is thought to provide top-down signals",
+    );
+  });
+
+  it("strips trailing three-dot ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("Preparatory activity is thought to provide..."),
+      "Preparatory activity is thought to provide",
+    );
+  });
+
+  it("strips both leading and trailing ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("...Preparatory activity..."),
+      "Preparatory activity",
+    );
+  });
+
+  it("strips unicode ellipsis character", function () {
+    assert.equal(
+      stripBoundaryEllipsis("\u2026Preparatory activity\u2026"),
+      "Preparatory activity",
+    );
+  });
+
+  it("strips bracketed ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("[...] Preparatory activity [...]"),
+      "Preparatory activity",
+    );
+  });
+
+  it("preserves internal ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("...first part... second part..."),
+      "first part... second part",
+    );
+  });
+
+  it("returns text unchanged when no boundary ellipsis", function () {
+    assert.equal(
+      stripBoundaryEllipsis("Preparatory activity is normal text"),
+      "Preparatory activity is normal text",
+    );
+  });
+});
+
+describe("splitQuoteAtEllipsis", function () {
+  it("returns single-element array for quotes without internal ellipsis", function () {
+    const result = splitQuoteAtEllipsis("Preparatory activity is thought to provide top-down signals");
+    assert.deepEqual(result, [
+      "Preparatory activity is thought to provide top-down signals",
+    ]);
+  });
+
+  it("splits at internal three-dot ellipsis", function () {
+    const result = splitQuoteAtEllipsis(
+      "...Preparatory activity is thought to provide top-down signals that enable rapid processing... The neural basis of this preparatory state involves distributed cortical networks...",
+    );
+    assert.equal(result.length, 2);
+    assert.include(result[0], "Preparatory activity");
+    assert.include(result[1], "neural basis");
+  });
+
+  it("sorts segments by length descending", function () {
+    const result = splitQuoteAtEllipsis(
+      "Short segment of minimal text length... A much longer segment that contains many more words and provides additional context for the reader",
+    );
+    assert.isAbove(result[0].length, result[result.length - 1].length);
+  });
+
+  it("filters out segments shorter than 30 characters", function () {
+    const result = splitQuoteAtEllipsis(
+      "tiny... A much longer segment that provides adequate context for search matching purposes",
+    );
+    assert.equal(result.length, 1);
+    assert.include(result[0], "longer segment");
+  });
+
+  it("handles unicode ellipsis character", function () {
+    const result = splitQuoteAtEllipsis(
+      "\u2026Preparatory activity is thought to provide top-down signals\u2026 The neural basis of this preparatory state involves distributed\u2026",
+    );
+    assert.equal(result.length, 2);
+    assert.isTrue(result.some((s) => s.includes("Preparatory activity")));
+    assert.isTrue(result.some((s) => s.includes("neural basis")));
+  });
+
+  it("strips boundary ellipsis before splitting", function () {
+    const result = splitQuoteAtEllipsis(
+      "...clean text without any internal ellipsis markers present here...",
+    );
+    assert.deepEqual(result, [
+      "clean text without any internal ellipsis markers present here",
+    ]);
+  });
+});
+
+describe("buildRawPrefixQueries", function () {
+  it("returns full text and prefixes for a long quote", function () {
+    const quote =
+      "Simulation analysis of drift mechanisms using normalized odor velocity in the olfactory bulb context.";
+    const result = buildRawPrefixQueries(quote);
+    // Full text comes first (≤220 chars), then 50-char and 30-char prefixes
+    assert.isAbove(result.length, 1);
+    assert.equal(result[0], quote);
+    // Each prefix should be trimmed to a word boundary
+    for (const q of result) {
+      assert.isFalse(q.endsWith(" "), "no trailing space");
+      assert.isAtLeast(q.length, 12, "each query is at least 12 chars");
+    }
+  });
+
+  it("returns empty for very short text", function () {
+    const result = buildRawPrefixQueries("short");
+    assert.deepEqual(result, []);
+  });
+
+  it("puts the full text first when short enough", function () {
+    const quote = "A moderately long sentence that is under two hundred and twenty characters.";
+    const result = buildRawPrefixQueries(quote);
+    assert.equal(result[0], quote);
+  });
+
+  it("trims prefixes to word boundaries", function () {
+    const quote =
+      "The representational drift observed in neural populations is a fundamental phenomenon worth studying.";
+    const result = buildRawPrefixQueries(quote);
+    for (const q of result) {
+      // Should not end with a partial word (space followed by chars at end)
+      assert.match(q, /\S$/, "ends with a non-space");
+    }
+  });
+});
+
+describe("locateQuoteByRawPrefixInPages", function () {
+  const samplePages = [
+    { pageIndex: 0, pageLabel: "1", text: "Introduction to neural coding and olfactory perception in the mammalian brain." },
+    { pageIndex: 1, pageLabel: "2", text: "We found that, in the bulb, the degradation of linear classifier performance across days was numerically comparable to that reported in the cortex." },
+    { pageIndex: 2, pageLabel: "3", text: "Simulation analysis of drift mechanisms using normalized odor velocity in the olfactory bulb context." },
+    { pageIndex: 3, pageLabel: "4", text: "Discussion and conclusions about representational drift." },
+  ];
+
+  it("finds a quote using the first few words", function () {
+    const result = locateQuoteByRawPrefixInPages(
+      samplePages,
+      "We found that, in the bulb, the degradation of linear classifier performance across days was numerically comparable to that reported in the cortex.",
+      null,
+    );
+    assert.isNotNull(result);
+    assert.equal(result!.status, "resolved");
+    assert.equal(result!.computedPageIndex, 1);
+  });
+
+  it("finds a quote even when only the beginning matches", function () {
+    const result = locateQuoteByRawPrefixInPages(
+      samplePages,
+      "Simulation analysis of drift mechanisms using normalized odor velocity in the olfactory bulb context. This extra text was fabricated by the LLM.",
+      null,
+    );
+    assert.isNotNull(result);
+    assert.equal(result!.status, "resolved");
+    assert.equal(result!.computedPageIndex, 2);
+  });
+
+  it("returns null when quote is not in any page", function () {
+    const result = locateQuoteByRawPrefixInPages(
+      samplePages,
+      "This sentence does not appear anywhere in the document at all whatsoever.",
+      null,
+    );
+    assert.isNull(result);
+  });
+
+  it("returns null for very short quotes", function () {
+    const result = locateQuoteByRawPrefixInPages(samplePages, "short", null);
+    assert.isNull(result);
+  });
+
+  it("handles quotes with punctuation differences via normalization", function () {
+    const result = locateQuoteByRawPrefixInPages(
+      samplePages,
+      "We found that in the bulb the degradation of linear classifier performance across days",
+      null,
+    );
+    assert.isNotNull(result);
+    assert.equal(result!.computedPageIndex, 1);
   });
 });

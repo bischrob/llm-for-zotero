@@ -345,15 +345,16 @@ async function applyPlannerAction(
       return;
     }
     case "active-paper": {
-      state.paperContexts = [];
       state.pinnedPaperContexts = [];
       state.recentPaperContexts = [];
       state.retrievedPaperContexts = [];
       if (state.activePaperContext) {
+        state.paperContexts = [state.activePaperContext];
         state.retrievalSummary = `Using active paper ${summarizePaper(state.activePaperContext)}.`;
         params.onTrace?.(`Planner selected active-paper.`);
         params.onTrace?.(state.retrievalSummary);
       } else {
+        state.paperContexts = [];
         state.activeContextItem = null;
         state.retrievalSummary =
           "No active paper was available, so Zotero retrieval was skipped.";

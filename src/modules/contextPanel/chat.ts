@@ -88,6 +88,7 @@ import { buildChatHistoryNotePayload } from "./notes";
 import { extractManagedBlobHash } from "./attachmentStorage";
 import { toFileUrl } from "../../utils/pathFileUrl";
 import { replaceOwnerAttachmentRefs } from "../../utils/attachmentRefStore";
+import { decorateAssistantCitationLinks } from "./assistantCitationLinks";
 
 /** Get AbortController constructor from global scope */
 function getAbortController(): new () => AbortController {
@@ -1018,7 +1019,12 @@ async function buildContextPlanForRequest(params: {
     kind: Parameters<typeof setStatus>[2],
   ) => void;
   setAgentStatusSafely?: (text: string) => void;
-}): Promise<string> {
+}): Promise<{
+  combinedContext: string;
+  paperContexts: PaperContextRef[];
+  pinnedPaperContexts: PaperContextRef[];
+  recentPaperContexts: PaperContextRef[];
+}> {
   const contextSource = resolveContextSourceItem(params.item);
   params.setStatusSafely(contextSource.statusText, "sending");
   let activeContextItem = contextSource.contextItem;
@@ -1123,7 +1129,12 @@ async function buildContextPlanForRequest(params: {
   if (planContext) {
     contextBlocks.push(planContext);
   }
-  return contextBlocks.join("\n\n---\n\n");
+  return {
+    combinedContext: contextBlocks.join("\n\n---\n\n"),
+    paperContexts,
+    pinnedPaperContexts,
+    recentPaperContexts,
+  };
 }
 
 function createQueuedRefresh(refresh: () => void): () => void {
@@ -1625,7 +1636,7 @@ export async function retryLatestAssistantResponse(
   try {
     const llmHistory = buildLLMHistoryMessages(historyForLLM);
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
-    const combinedContext = await buildContextPlanForRequest({
+    const contextPlan = await buildContextPlanForRequest({
       item,
       question,
       images: screenshotImages,
@@ -1637,6 +1648,26 @@ export async function retryLatestAssistantResponse(
       agentEnabled,
       setStatusSafely,
       setAgentStatusSafely,
+    });
+    const combinedContext = contextPlan.combinedContext;
+    retryPair.userMessage.paperContexts = contextPlan.paperContexts.length
+      ? contextPlan.paperContexts
+      : undefined;
+    retryPair.userMessage.pinnedPaperContexts =
+      contextPlan.pinnedPaperContexts.length
+        ? contextPlan.pinnedPaperContexts
+        : undefined;
+    await updateStoredLatestUserMessage(conversationKey, {
+      text: retryPair.userMessage.text,
+      timestamp: retryPair.userMessage.timestamp,
+      selectedText: retryPair.userMessage.selectedText,
+      selectedTexts: retryPair.userMessage.selectedTexts,
+      selectedTextSources: retryPair.userMessage.selectedTextSources,
+      selectedTextPaperContexts:
+        retryPair.userMessage.selectedTextPaperContexts,
+      screenshotImages: retryPair.userMessage.screenshotImages,
+      paperContexts: retryPair.userMessage.paperContexts,
+      attachments: retryPair.userMessage.attachments,
     });
     if (cancelledRequestId >= thisRequestId) {
       restoreOriginalAssistant();
@@ -1928,7 +1959,7 @@ export async function sendQuestion(
   try {
     const llmHistory = buildLLMHistoryMessages(historyForLLM);
     const recentPaperContexts = collectRecentPaperContexts(historyForLLM);
-    const combinedContext = await buildContextPlanForRequest({
+    const contextPlan = await buildContextPlanForRequest({
       item,
       question,
       images,
@@ -1940,6 +1971,24 @@ export async function sendQuestion(
       agentEnabled,
       setStatusSafely,
       setAgentStatusSafely,
+    });
+    const combinedContext = contextPlan.combinedContext;
+    userMessage.paperContexts = contextPlan.paperContexts.length
+      ? contextPlan.paperContexts
+      : undefined;
+    userMessage.pinnedPaperContexts = contextPlan.pinnedPaperContexts.length
+      ? contextPlan.pinnedPaperContexts
+      : undefined;
+    await updateStoredLatestUserMessage(conversationKey, {
+      text: userMessage.text,
+      timestamp: userMessage.timestamp,
+      selectedText: userMessage.selectedText,
+      selectedTexts: userMessage.selectedTexts,
+      selectedTextSources: userMessage.selectedTextSources,
+      selectedTextPaperContexts: userMessage.selectedTextPaperContexts,
+      screenshotImages: userMessage.screenshotImages,
+      paperContexts: userMessage.paperContexts,
+      attachments: userMessage.attachments,
     });
 
     const AbortControllerCtor = getAbortController();
@@ -2638,6 +2687,26 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         } catch (err) {
           ztoolkit.log("LLM render error:", err);
           bubble.textContent = safeText;
+        }
+        if (!msg.streaming) {
+          try {
+            const pairedUserMessage =
+              history[index - 1]?.role === "user" ? history[index - 1] : null;
+            ztoolkit.log("LLM: calling decorateAssistantCitationLinks",
+              "msgLen =", msg.text.length,
+              "bubbleHTML =", String(bubble.innerHTML || "").length,
+              "hasPairedUser =", Boolean(pairedUserMessage),
+              "pairedPaperContexts =", pairedUserMessage?.paperContexts?.length ?? "none");
+            decorateAssistantCitationLinks({
+              body,
+              panelItem: item,
+              bubble,
+              assistantMessage: msg,
+              pairedUserMessage,
+            });
+          } catch (decorateErr) {
+            ztoolkit.log("LLM citation decoration error:", decorateErr);
+          }
         }
         bubble.addEventListener("contextmenu", (e: Event) => {
           const me = e as MouseEvent;

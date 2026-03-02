@@ -1824,6 +1824,43 @@
   text-decoration: underline;
 }
 
+.llm-bubble.assistant .llm-paper-citation-row {
+  margin-top: -2px;
+}
+
+.llm-bubble.assistant .llm-paper-citation-link {
+  appearance: none;
+  -moz-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.llm-bubble.assistant .llm-paper-citation-link:hover:not(:disabled),
+.llm-bubble.assistant .llm-paper-citation-link:focus-visible {
+  color: color-mix(in srgb, var(--color-accent) 78%, white 22%);
+}
+
+.llm-bubble.assistant .llm-paper-citation-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, white 50%);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.llm-bubble.assistant .llm-paper-citation-link[data-loading="true"] {
+  opacity: 0.68;
+  cursor: progress;
+}
+
 .llm-bubble.assistant hr {
   border: none;
   border-top: 1px solid var(--stroke-secondary);
