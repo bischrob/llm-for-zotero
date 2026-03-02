@@ -310,9 +310,9 @@ async function navigateReaderToPage(
   pageLabel?: string,
 ): Promise<void> {
   if (typeof reader?.navigate !== "function") return;
+  void pageLabel;
   await reader.navigate({
     pageIndex: Math.floor(pageIndex),
-    pageLabel: pageLabel || `${Math.floor(pageIndex) + 1}`,
   });
 }
 
@@ -325,8 +325,32 @@ async function navigateToCachedCitationPage(
   if (!cached) return false;
   const reader = await openReaderForItem(contextItemId);
   if (!reader) return false;
-  await navigateReaderToPage(reader, cached.pageIndex, cached.pageLabel);
-  await flashPageInLivePdfReader(reader, cached.pageIndex);
+
+  let targetPageIndex = Math.floor(cached.pageIndex);
+  let targetPageLabel =
+    typeof cached.pageLabel === "string" && cached.pageLabel.trim()
+      ? cached.pageLabel.trim()
+      : `${targetPageIndex + 1}`;
+
+  try {
+    const verified = await locateQuoteInLivePdfReader(reader, quoteText);
+    if (verified.status === "resolved" && verified.computedPageIndex !== null) {
+      const verifiedPageIndex = Math.floor(verified.computedPageIndex);
+      if (verifiedPageIndex >= 0 && verifiedPageIndex !== targetPageIndex) {
+        targetPageIndex = verifiedPageIndex;
+        targetPageLabel = `${verifiedPageIndex + 1}`;
+        citationPageCache.set(cacheKey, {
+          pageIndex: verifiedPageIndex,
+          pageLabel: targetPageLabel,
+        });
+      }
+    }
+  } catch (_err) {
+    void _err;
+  }
+
+  await navigateReaderToPage(reader, targetPageIndex, targetPageLabel);
+  await flashPageInLivePdfReader(reader, targetPageIndex);
   return true;
 }
 
@@ -467,6 +491,49 @@ function updateCitationButtonPage(
   if (!button.isConnected) return;
   const labelWithPage = formatSourceLabelWithPage(baseSourceLabel, pageLabel);
   button.textContent = labelWithPage;
+
+  const syncKey = sanitizeText(button.dataset.citationSyncKey || "").trim();
+  if (!syncKey) return;
+
+  const docs = new Set<Document>();
+  const pushDoc = (doc?: Document | null) => {
+    if (doc) docs.add(doc);
+  };
+  pushDoc(button.ownerDocument || null);
+  try {
+    pushDoc(Zotero.getMainWindow?.()?.document || null);
+  } catch (_err) {
+    void _err;
+  }
+  try {
+    const windows = Zotero.getMainWindows?.() || [];
+    for (const win of windows) {
+      pushDoc(win?.document || null);
+    }
+  } catch (_err) {
+    void _err;
+  }
+
+  for (const doc of docs) {
+    try {
+      const syncButtons = Array.from(
+        doc.querySelectorAll("button.llm-paper-citation-link"),
+      ) as HTMLButtonElement[];
+      for (const syncButton of syncButtons) {
+        if (syncButton === button) continue;
+        if (
+          sanitizeText(syncButton.dataset.citationSyncKey || "").trim() !==
+          syncKey
+        ) {
+          continue;
+        }
+        if (!syncButton.isConnected) continue;
+        syncButton.textContent = labelWithPage;
+      }
+    } catch (_err) {
+      void _err;
+    }
+  }
 }
 
 async function resolvePageForCitationButton(params: {
@@ -495,24 +562,23 @@ async function resolvePageForCitationButton(params: {
     }
 
     const activeReader = getActiveReaderForSelectedTab();
-    if (!activeReader) return;
     const activeReaderItemId = getReaderItemId(activeReader);
-    if (!activeReaderItemId) return;
-
-    const matchingCandidate = orderedCandidates.find(
-      (candidate) => candidate.contextItemId === activeReaderItemId,
-    );
-    if (matchingCandidate) {
-      const result = await locateQuoteInLivePdfReader(activeReader, params.quoteText);
-      if (result.status === "resolved" && result.computedPageIndex !== null) {
-        const pageIndex = Math.floor(result.computedPageIndex);
-        const pageLabel = `${pageIndex + 1}`;
-        citationPageCache.set(
-          buildCitationCacheKey(matchingCandidate.contextItemId, params.quoteText),
-          { pageIndex, pageLabel },
-        );
-        updateCitationButtonPage(params.button, params.baseSourceLabel, pageLabel);
-        return;
+    if (activeReader && activeReaderItemId) {
+      const matchingCandidate = orderedCandidates.find(
+        (candidate) => candidate.contextItemId === activeReaderItemId,
+      );
+      if (matchingCandidate) {
+        const result = await locateQuoteInLivePdfReader(activeReader, params.quoteText);
+        if (result.status === "resolved" && result.computedPageIndex !== null) {
+          const pageIndex = Math.floor(result.computedPageIndex);
+          const pageLabel = `${pageIndex + 1}`;
+          citationPageCache.set(
+            buildCitationCacheKey(matchingCandidate.contextItemId, params.quoteText),
+            { pageIndex, pageLabel },
+          );
+          updateCitationButtonPage(params.button, params.baseSourceLabel, pageLabel);
+          return;
+        }
       }
     }
 
@@ -922,6 +988,8 @@ export function decorateAssistantCitationLinks(params: {
     citationButton.textContent = baseSourceLabel;
     citationButton.title = "Jump to the cited source in the paper";
     citationButton.dataset.loading = "false";
+    citationButton.dataset.citationSyncKey =
+      `${normalizeCitationLabel(baseSourceLabel)}\u241f${normalizeQuoteKey(quoteText)}`;
 
     const handleCitationClick = () => {
       void resolveAndNavigateAssistantCitation({
