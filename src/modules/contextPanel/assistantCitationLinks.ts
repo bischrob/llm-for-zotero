@@ -47,6 +47,104 @@ type ExtractedCitationLabel = {
   normalizedCitationKey?: string;
 };
 
+type BlockquoteTailCitationMatch = {
+  quoteText: string;
+  extractedCitation: ExtractedCitationLabel;
+};
+
+type InlineCitationMatch = {
+  start: number;
+  end: number;
+  rawText: string;
+  extractedCitation: ExtractedCitationLabel;
+};
+
+type GroupedInlineCitationSegment = {
+  relativeStart: number;
+  relativeEnd: number;
+  extractedCitation: ExtractedCitationLabel;
+};
+
+type GroupedInlineCitationParseResult = {
+  attempted: boolean;
+  segments: GroupedInlineCitationSegment[];
+};
+
+const INLINE_CITATION_PATTERN =
+  /(\([^()]+?\)(?:\s*\[[^\]]+\])?(?:\s*,?\s*page\s+[^,.;:!?]+)?)/gi;
+const INLINE_NARRATIVE_CITATION_PATTERN =
+  /\b([A-Z][\p{L}'’.-]+(?:\s+et\s+al\.?)?)\s*\(\s*((?:19|20)\d{2}[a-z]?)\s*\)/gu;
+const INLINE_NARRATIVE_COMMA_CITATION_PATTERN =
+  /\b([A-Z][\p{L}'’.-]+(?:\s+et\s+al\.?)?)\s*,\s*((?:19|20)\d{2}[a-z]?)\b/gu;
+
+type CitationMatchBuffer = {
+  cleanText: string;
+  cleanToOriginalIndex: number[];
+};
+
+const INLINE_CITATION_LEADING_CUE_PATTERN =
+  /^(?:e\.?\s*g\.?|i\.?\s*e\.?|see(?:\s+also)?|cf\.?|compare|for\s+example|for\s+instance|such\s+as|and\b|&)\s*[:,]?\s*/i;
+
+function isCitationControlCharCode(code: number): boolean {
+  return (
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2060 && code <= 0x2069) ||
+    code === 0xfeff ||
+    code === 0x00ad
+  );
+}
+
+function stripCitationControlChars(value: string): string {
+  const source = String(value || "");
+  if (!source) return "";
+  let out = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (isCitationControlCharCode(code)) continue;
+    out += source[index];
+  }
+  return out;
+}
+
+function buildCitationMatchBuffer(source: string): CitationMatchBuffer {
+  const cleanToOriginalIndex: number[] = [];
+  let cleanText = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (isCitationControlCharCode(code)) continue;
+    cleanToOriginalIndex.push(index);
+    cleanText += source[index];
+  }
+  return { cleanText, cleanToOriginalIndex };
+}
+
+function mapCleanRangeToSourceRange(
+  cleanStart: number,
+  cleanEnd: number,
+  cleanToOriginalIndex: number[],
+): { start: number; end: number } | null {
+  if (!cleanToOriginalIndex.length) return null;
+  if (!Number.isFinite(cleanStart) || !Number.isFinite(cleanEnd)) return null;
+  const boundedStart = Math.max(0, Math.floor(cleanStart));
+  const boundedEnd = Math.max(boundedStart + 1, Math.floor(cleanEnd));
+  if (boundedStart >= cleanToOriginalIndex.length) return null;
+  const sourceStart = cleanToOriginalIndex[boundedStart];
+  const sourceEndIndex =
+    cleanToOriginalIndex[
+      Math.min(cleanToOriginalIndex.length - 1, boundedEnd - 1)
+    ];
+  return {
+    start: sourceStart,
+    end: sourceEndIndex + 1,
+  };
+}
+
+function isYearOnlyCitationLabel(value: string): boolean {
+  const normalized = normalizeCitationLabel(value).replace(/[()]/g, "").trim();
+  return /^(?:19|20)\d{2}[a-z]?$/.test(normalized);
+}
+
 const citationPageCache = new Map<
   string,
   {
@@ -74,21 +172,21 @@ export function formatSourceLabelWithPage(
 }
 
 function normalizeCitationLabel(value: string): string {
-  return sanitizeText(value || "")
+  return stripCitationControlChars(sanitizeText(value || ""))
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
 }
 
 function normalizeCitationKey(value: string): string {
-  return sanitizeText(value || "")
+  return stripCitationControlChars(sanitizeText(value || ""))
     .replace(/\s+/g, "")
     .trim()
     .toLowerCase();
 }
 
 function stripCitationKeyFromLabel(value: string): string {
-  return sanitizeText(value || "")
+  return stripCitationControlChars(sanitizeText(value || ""))
     .replace(/\s*\[[^\]]+\]\s*$/g, "")
     .trim();
 }
@@ -288,7 +386,7 @@ function getNextElementSibling(element: Element): Element | null {
 export function extractStandalonePaperSourceLabel(
   value: string,
 ): ExtractedCitationLabel | null {
-  const normalized = sanitizeText(value || "")
+  const normalized = stripCitationControlChars(sanitizeText(value || ""))
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return null;
@@ -300,10 +398,12 @@ export function extractStandalonePaperSourceLabel(
   ) => {
     const citationWithoutKey = stripCitationKeyFromLabel(rawCitation);
     const citationKeyFromLabelMatch = rawCitation.match(/\[([^\]]+)\]\s*$/);
-    const parsedCitationKey = sanitizeText(
-      rawKey || citationKeyFromLabelMatch?.[1] || "",
+    const parsedCitationKey = stripCitationControlChars(
+      sanitizeText(rawKey || citationKeyFromLabelMatch?.[1] || ""),
     ).trim();
-    const parsedPageLabel = sanitizeText(rawPage || "").trim();
+    const parsedPageLabel = stripCitationControlChars(
+      sanitizeText(rawPage || ""),
+    ).trim();
     const sourceLabel = parsedCitationKey
       ? `(${citationWithoutKey} [${parsedCitationKey}])`
       : `(${citationWithoutKey})`;
@@ -369,6 +469,308 @@ export function extractStandalonePaperSourceLabel(
   };
 }
 
+function isLikelyStandaloneCitationLabel(value: string): boolean {
+  const normalized = stripCitationControlChars(sanitizeText(value || ""))
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+  return (
+    /\bet\s+al\b/.test(normalized) ||
+    /\b(19|20)\d{2}\b/.test(normalized) ||
+    /\bcid:[^\]]+/.test(normalized) ||
+    /\[[^\]]+\]/.test(normalized) ||
+    /\bpaper(?:\s+\d+)?\b/.test(normalized)
+  );
+}
+
+export function extractBlockquoteTailCitation(
+  value: string,
+): BlockquoteTailCitationMatch | null {
+  const raw = sanitizeText(value || "").replace(/\r\n?/g, "\n");
+  if (!raw.trim()) return null;
+
+  const lines = raw
+    .split("\n")
+    .map((line) => sanitizeText(line || "").trim())
+    .filter(Boolean);
+  if (lines.length >= 2) {
+    const tailLine = lines[lines.length - 1];
+    if (isLikelyStandaloneCitationLabel(tailLine)) {
+      const extractedCitation = extractStandalonePaperSourceLabel(tailLine);
+      if (extractedCitation) {
+        const quoteText = sanitizeText(lines.slice(0, -1).join(" ")).trim();
+        if (quoteText.length >= 8) {
+          return { quoteText, extractedCitation };
+        }
+      }
+    }
+  }
+
+  const compact = sanitizeText(raw).replace(/\s+/g, " ").trim();
+  const tailMatch = compact.match(
+    /(\([^()]+?\)(?:\s*\[[^\]]+\])?(?:\s*,?\s*page\s+[^,;]+)?\.?)$/i,
+  );
+  if (!tailMatch) return null;
+  const tailCitation = sanitizeText(tailMatch[1] || "").trim();
+  if (!isLikelyStandaloneCitationLabel(tailCitation)) return null;
+  const extractedCitation = extractStandalonePaperSourceLabel(tailCitation);
+  if (!extractedCitation) return null;
+
+  const quoteText = sanitizeText(
+    compact.slice(0, compact.length - tailCitation.length),
+  ).trim();
+  if (quoteText.length < 8) return null;
+  return { quoteText, extractedCitation };
+}
+
+function stripLeadingInlineCitationCue(value: string): {
+  stripped: string;
+  consumed: number;
+} {
+  let remaining = String(value || "");
+  let consumed = 0;
+  while (remaining) {
+    const cueMatch = remaining.match(INLINE_CITATION_LEADING_CUE_PATTERN);
+    if (!cueMatch) break;
+    consumed += cueMatch[0].length;
+    remaining = remaining.slice(cueMatch[0].length);
+  }
+  return {
+    stripped: remaining,
+    consumed,
+  };
+}
+
+function parseGroupedInlineCitationMatch(
+  rawMatchText: string,
+): GroupedInlineCitationParseResult {
+  const raw = String(rawMatchText || "");
+  const openParenIndex = raw.indexOf("(");
+  const closeParenIndex = raw.lastIndexOf(")");
+  if (openParenIndex < 0 || closeParenIndex <= openParenIndex) {
+    return { attempted: false, segments: [] };
+  }
+
+  const suffix = raw.slice(closeParenIndex + 1).trim();
+  if (suffix) {
+    return { attempted: false, segments: [] };
+  }
+
+  const inner = raw.slice(openParenIndex + 1, closeParenIndex);
+  if (!inner.includes(";")) {
+    return { attempted: false, segments: [] };
+  }
+
+  const segments: GroupedInlineCitationSegment[] = [];
+  let partStart = 0;
+  for (let cursor = 0; cursor <= inner.length; cursor += 1) {
+    const isBoundary = cursor === inner.length || inner[cursor] === ";";
+    if (!isBoundary) continue;
+
+    const rawPart = inner.slice(partStart, cursor);
+    const leadingSpaceLen = rawPart.match(/^\s*/)?.[0]?.length || 0;
+    const trimmedPart = rawPart.trim();
+    if (trimmedPart) {
+      const { stripped, consumed } = stripLeadingInlineCitationCue(trimmedPart);
+      const strippedPart = stripped.trim();
+      if (strippedPart) {
+        if (!isLikelyStandaloneCitationLabel(strippedPart)) {
+          partStart = cursor + 1;
+          continue;
+        }
+        const extractedCitation = extractStandalonePaperSourceLabel(
+          `(${strippedPart})`,
+        );
+        if (
+          extractedCitation &&
+          !isYearOnlyCitationLabel(extractedCitation.citationLabel)
+        ) {
+          const relativeStart =
+            openParenIndex + 1 + partStart + leadingSpaceLen + consumed;
+          const relativeEnd = relativeStart + strippedPart.length;
+          if (relativeEnd > relativeStart) {
+            segments.push({
+              relativeStart,
+              relativeEnd,
+              extractedCitation,
+            });
+          }
+        }
+      }
+    }
+
+    partStart = cursor + 1;
+  }
+
+  return {
+    attempted: true,
+    segments,
+  };
+}
+
+export function extractInlineCitationMentions(
+  value: string,
+): InlineCitationMatch[] {
+  const source = String(value || "");
+  if (!source) return [];
+  const { cleanText, cleanToOriginalIndex } = buildCitationMatchBuffer(source);
+  if (!cleanText || !cleanToOriginalIndex.length) return [];
+  const out: InlineCitationMatch[] = [];
+  const hasOverlap = (start: number, end: number): boolean =>
+    out.some((entry) => start < entry.end && end > entry.start);
+
+  const pushMatch = (
+    cleanStart: number,
+    cleanEnd: number,
+    extractedCitation: ExtractedCitationLabel,
+  ): void => {
+    const mapped = mapCleanRangeToSourceRange(
+      cleanStart,
+      cleanEnd,
+      cleanToOriginalIndex,
+    );
+    if (!mapped) return;
+    if (mapped.end <= mapped.start || hasOverlap(mapped.start, mapped.end))
+      return;
+    out.push({
+      start: mapped.start,
+      end: mapped.end,
+      rawText: source.slice(mapped.start, mapped.end),
+      extractedCitation,
+    });
+  };
+
+  INLINE_CITATION_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+  while ((match = INLINE_CITATION_PATTERN.exec(cleanText))) {
+    const rawMatchText = String(match[1] || "");
+    const start = Number(match.index || 0);
+    const grouped = parseGroupedInlineCitationMatch(rawMatchText);
+    if (grouped.attempted) {
+      for (const segment of grouped.segments) {
+        pushMatch(
+          start + segment.relativeStart,
+          start + segment.relativeEnd,
+          segment.extractedCitation,
+        );
+      }
+      continue;
+    }
+
+    const rawText = stripCitationControlChars(
+      sanitizeText(rawMatchText),
+    ).trim();
+    if (!rawText) continue;
+    if (!isLikelyStandaloneCitationLabel(rawText)) continue;
+    const extractedCitation = extractStandalonePaperSourceLabel(rawText);
+    if (!extractedCitation) continue;
+    const end = start + rawMatchText.length;
+
+    if (isYearOnlyCitationLabel(extractedCitation.citationLabel)) {
+      const yearLabel = rawText.match(/\(([^)]+)\)/)?.[1]?.trim() || "";
+      const leftContextStart = Math.max(0, start - 128);
+      const leftContext = cleanText.slice(leftContextStart, start);
+      const authorMatch = leftContext.match(
+        /([A-Z][\p{L}'’.-]+(?:\s+et\s+al\.?)?)\s*$/u,
+      );
+      if (authorMatch) {
+        const authorText = stripCitationControlChars(
+          sanitizeText(String(authorMatch[1] || "")),
+        ).trim();
+        if (authorText) {
+          const syntheticCitation = `(${authorText}, ${yearLabel})`;
+          const extractedFromNarrative =
+            extractStandalonePaperSourceLabel(syntheticCitation);
+          if (extractedFromNarrative) {
+            const authorOffset =
+              typeof authorMatch.index === "number" ? authorMatch.index : -1;
+            if (authorOffset < 0) continue;
+            const authorCleanStart = leftContextStart + authorOffset;
+            pushMatch(authorCleanStart, end, extractedFromNarrative);
+            continue;
+          }
+        }
+      }
+      continue;
+    }
+
+    pushMatch(start, end, extractedCitation);
+  }
+
+  const findPrevNonSpaceChar = (index: number): string => {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const ch = cleanText[cursor];
+      if (!ch || /\s/.test(ch)) continue;
+      return ch;
+    }
+    return "";
+  };
+
+  const findNextNonSpaceChar = (index: number): string => {
+    for (let cursor = index; cursor < cleanText.length; cursor += 1) {
+      const ch = cleanText[cursor];
+      if (!ch || /\s/.test(ch)) continue;
+      return ch;
+    }
+    return "";
+  };
+
+  const isWrappedByParentheses = (
+    cleanStart: number,
+    cleanEnd: number,
+  ): boolean =>
+    findPrevNonSpaceChar(cleanStart) === "(" &&
+    findNextNonSpaceChar(cleanEnd) === ")";
+
+  INLINE_NARRATIVE_CITATION_PATTERN.lastIndex = 0;
+  let narrativeMatch: RegExpExecArray | null = null;
+  while ((narrativeMatch = INLINE_NARRATIVE_CITATION_PATTERN.exec(cleanText))) {
+    const rawMatchText = String(narrativeMatch[0] || "");
+    const authorText = stripCitationControlChars(
+      sanitizeText(String(narrativeMatch[1] || "")),
+    ).trim();
+    const yearText = stripCitationControlChars(
+      sanitizeText(String(narrativeMatch[2] || "")),
+    ).trim();
+    if (!rawMatchText || !authorText || !yearText) continue;
+    const syntheticCitation = `(${authorText}, ${yearText})`;
+    const extractedCitation =
+      extractStandalonePaperSourceLabel(syntheticCitation);
+    if (!extractedCitation) continue;
+    const start = Number(narrativeMatch.index || 0);
+    const end = start + rawMatchText.length;
+    if (isWrappedByParentheses(start, end)) continue;
+    pushMatch(start, end, extractedCitation);
+  }
+
+  INLINE_NARRATIVE_COMMA_CITATION_PATTERN.lastIndex = 0;
+  let narrativeCommaMatch: RegExpExecArray | null = null;
+  while (
+    (narrativeCommaMatch =
+      INLINE_NARRATIVE_COMMA_CITATION_PATTERN.exec(cleanText))
+  ) {
+    const rawMatchText = String(narrativeCommaMatch[0] || "");
+    const authorText = stripCitationControlChars(
+      sanitizeText(String(narrativeCommaMatch[1] || "")),
+    ).trim();
+    const yearText = stripCitationControlChars(
+      sanitizeText(String(narrativeCommaMatch[2] || "")),
+    ).trim();
+    if (!rawMatchText || !authorText || !yearText) continue;
+    const syntheticCitation = `(${authorText}, ${yearText})`;
+    const extractedCitation =
+      extractStandalonePaperSourceLabel(syntheticCitation);
+    if (!extractedCitation) continue;
+    const start = Number(narrativeCommaMatch.index || 0);
+    const end = start + rawMatchText.length;
+    if (isWrappedByParentheses(start, end)) continue;
+    pushMatch(start, end, extractedCitation);
+  }
+  out.sort((left, right) => left.start - right.start);
+  return out;
+}
+
 export function matchAssistantCitationCandidates(
   citationLineText: string,
   paperContexts: PaperContextRef[],
@@ -376,26 +778,23 @@ export function matchAssistantCitationCandidates(
   const extracted = extractStandalonePaperSourceLabel(citationLineText);
   if (!extracted) return [];
   const candidates = buildCandidateListFromPaperContexts(paperContexts);
-  if (extracted.normalizedCitationKey) {
-    const keyedMatches = candidates.filter((candidate) => {
-      const candidateCitationKey = normalizeCitationKey(
-        candidate.paperContext.citationKey || "",
-      );
-      return (
+  return candidates.filter((candidate) => {
+    const candidateCitationKey = normalizeCitationKey(
+      candidate.paperContext.citationKey || "",
+    );
+    if (extracted.normalizedCitationKey) {
+      return Boolean(
         candidateCitationKey &&
-        extracted.normalizedCitationKey === candidateCitationKey
+        extracted.normalizedCitationKey === candidateCitationKey,
       );
-    });
-    if (keyedMatches.length) {
-      return keyedMatches;
     }
-  }
-  return candidates.filter(
-    (candidate) =>
+    return (
       candidate.normalizedSourceLabel === extracted.normalizedSourceLabel ||
       candidate.normalizedCitationLabel === extracted.normalizedCitationLabel ||
-      candidate.normalizedCitationLabel === extracted.normalizedDisplayCitationLabel,
-  );
+      candidate.normalizedCitationLabel ===
+        extracted.normalizedDisplayCitationLabel
+    );
+  });
 }
 
 async function waitForReaderForItem(targetItemId: number): Promise<any | null> {
@@ -785,6 +1184,7 @@ async function resolvePageForCitationButton(params: {
   quoteText: string;
 }): Promise<void> {
   try {
+    const normalizedQuoteText = sanitizeText(params.quoteText || "").trim();
     const orderedCandidates = await buildOrderedCitationCandidates(
       params.panelItem,
       params.extractedCitation,
@@ -806,7 +1206,7 @@ async function resolvePageForCitationButton(params: {
       if (bestRanked) {
         const pageIndex = Math.max(0, parseInt(eagerExplicitPage, 10) - 1);
         citationPageCache.set(
-          buildCitationCacheKey(bestRanked.contextItemId, params.quoteText),
+          buildCitationCacheKey(bestRanked.contextItemId, normalizedQuoteText),
           { pageIndex, pageLabel: eagerExplicitPage },
         );
         updateCitationButtonPage(
@@ -818,6 +1218,9 @@ async function resolvePageForCitationButton(params: {
       }
     }
 
+    // No quote snippet -> nothing to resolve eagerly at page level.
+    if (!normalizedQuoteText) return;
+
     // Cache check — skip rank-0 candidates to avoid stale entries from
     // whatever PDF happens to be open winning over the actual cited paper.
     for (const candidate of orderedCandidates) {
@@ -825,7 +1228,7 @@ async function resolvePageForCitationButton(params: {
         continue;
       const cacheKey = buildCitationCacheKey(
         candidate.contextItemId,
-        params.quoteText,
+        normalizedQuoteText,
       );
       const cached = citationPageCache.get(cacheKey);
       if (cached?.pageLabel) {
@@ -853,7 +1256,7 @@ async function resolvePageForCitationButton(params: {
       if (matchingCandidate) {
         const result = await locateQuoteInLivePdfReader(
           activeReader,
-          params.quoteText,
+          normalizedQuoteText,
         );
         if (result.status === "resolved" && result.computedPageIndex !== null) {
           const pageIndex = Math.floor(result.computedPageIndex);
@@ -861,7 +1264,7 @@ async function resolvePageForCitationButton(params: {
           citationPageCache.set(
             buildCitationCacheKey(
               matchingCandidate.contextItemId,
-              params.quoteText,
+              normalizedQuoteText,
             ),
             { pageIndex, pageLabel },
           );
@@ -883,11 +1286,11 @@ async function resolvePageForCitationButton(params: {
         continue;
       const resolved = await locateCitationPageWithPdfWorker(
         candidate.contextItemId,
-        params.quoteText,
+        normalizedQuoteText,
       );
       if (!resolved) continue;
       citationPageCache.set(
-        buildCitationCacheKey(candidate.contextItemId, params.quoteText),
+        buildCitationCacheKey(candidate.contextItemId, normalizedQuoteText),
         { pageIndex: resolved.pageIndex, pageLabel: resolved.pageLabel },
       );
       updateCitationButtonPage(
@@ -906,7 +1309,7 @@ async function resolvePageForCitationButton(params: {
  * Dynamically resolve fallback candidates from the panel item / active reader
  * at interaction time.  This runs when the static candidate list from the user
  * message turns out to be empty (e.g. because paperContexts weren't stored or
- * no paper contexts were forwarded).
+ * the agent was not enabled).
  */
 function resolveFallbackCandidates(
   panelItem: Zotero.Item,
@@ -1121,6 +1524,7 @@ async function resolveAndNavigateAssistantCitation(params: {
   params.button.disabled = true;
 
   try {
+    const normalizedQuoteText = sanitizeText(params.quoteText || "").trim();
     const extractedCitation = extractStandalonePaperSourceLabel(
       params.baseSourceLabel,
     );
@@ -1133,6 +1537,23 @@ async function resolveAndNavigateAssistantCitation(params: {
       extractedCitation,
       staticCandidates,
     );
+    // General inline citations may not have a quote snippet to page-locate.
+    // In that case, open the best matching paper directly.
+    if (!normalizedQuoteText) {
+      const firstCandidate = orderedCandidates[0];
+      if (!firstCandidate) {
+        if (status)
+          setStatus(status, "No matching cited paper was found.", "error");
+        return;
+      }
+      const opened = await openReaderForItem(firstCandidate.contextItemId);
+      if (opened) {
+        if (status) setStatus(status, "Opened cited paper.", "ready");
+        return;
+      }
+      if (status) setStatus(status, "Could not open the cited paper.", "error");
+      return;
+    }
 
     // Fast path: if the citation carried an explicit page number (e.g.
     // "(Carrasco et al., 2026, page 41)") AND we have a high-confidence label
@@ -1169,12 +1590,12 @@ async function resolveAndNavigateAssistantCitation(params: {
     for (const candidate of orderedCandidates) {
       const cached = await navigateToCachedCitationPage(
         candidate.contextItemId,
-        params.quoteText,
+        normalizedQuoteText,
       );
       if (cached) {
         const cacheKey = buildCitationCacheKey(
           candidate.contextItemId,
-          params.quoteText,
+          normalizedQuoteText,
         );
         const cachedEntry = citationPageCache.get(cacheKey);
         if (cachedEntry?.pageLabel) {
@@ -1199,7 +1620,7 @@ async function resolveAndNavigateAssistantCitation(params: {
       if (activeReader) {
         const result = await locateQuoteInLivePdfReader(
           activeReader,
-          params.quoteText,
+          normalizedQuoteText,
         );
         if (result.status === "resolved" && result.computedPageIndex !== null) {
           const pageIndex = Math.floor(result.computedPageIndex);
@@ -1235,12 +1656,15 @@ async function resolveAndNavigateAssistantCitation(params: {
         lastReason = "Could not open the cited paper.";
         continue;
       }
-      const result = await locateQuoteInLivePdfReader(reader, params.quoteText);
+      const result = await locateQuoteInLivePdfReader(
+        reader,
+        normalizedQuoteText,
+      );
       if (result.status === "resolved" && result.computedPageIndex !== null) {
         const pageIndex = Math.floor(result.computedPageIndex);
         const pageLabel = `${pageIndex + 1}`;
         citationPageCache.set(
-          buildCitationCacheKey(candidate.contextItemId, params.quoteText),
+          buildCitationCacheKey(candidate.contextItemId, normalizedQuoteText),
           { pageIndex, pageLabel },
         );
         const targetReader =
@@ -1285,6 +1709,201 @@ async function resolveAndNavigateAssistantCitation(params: {
   }
 }
 
+function resolveMatchingCandidatesForExtractedCitation(
+  extractedCitation: ExtractedCitationLabel,
+  candidates: AssistantCitationPaperCandidate[],
+): AssistantCitationPaperCandidate[] {
+  const isGroupedCitation =
+    extractedCitation.normalizedCitationLabel.includes(";");
+  const out: AssistantCitationPaperCandidate[] = candidates.filter(
+    (candidate) =>
+      candidate.normalizedSourceLabel ===
+        extractedCitation.normalizedSourceLabel ||
+      candidate.normalizedCitationLabel ===
+        extractedCitation.normalizedCitationLabel,
+  );
+  if (!out.length && candidates.length && !isGroupedCitation) {
+    const citationAuthorKey = extractAuthorKey(
+      extractedCitation.normalizedCitationLabel,
+    );
+    if (citationAuthorKey) {
+      const fuzzy = candidates.filter(
+        (candidate) =>
+          extractAuthorKey(candidate.normalizedCitationLabel) ===
+          citationAuthorKey,
+      );
+      if (fuzzy.length) {
+        out.push(...fuzzy);
+      }
+    }
+  }
+  if (!out.length && candidates.length === 1 && !isGroupedCitation) {
+    out.push(candidates[0]);
+  }
+  return out;
+}
+
+function createCitationButton(params: {
+  ownerDoc: Document;
+  body: Element;
+  panelItem: Zotero.Item;
+  candidates: AssistantCitationPaperCandidate[];
+  extractedCitation: ExtractedCitationLabel;
+  quoteText: string;
+  inline?: boolean;
+}): HTMLButtonElement {
+  const baseSourceLabel = params.extractedCitation.sourceLabel;
+  const displayCitationLabel = params.extractedCitation.displayCitationLabel;
+  const citationButton = params.ownerDoc.createElement(
+    "button",
+  ) as HTMLButtonElement;
+  citationButton.type = "button";
+  citationButton.className = params.inline
+    ? "llm-paper-citation-link llm-paper-context-chip-header llm-paper-citation-link-inline"
+    : "llm-paper-citation-link llm-paper-context-chip-header";
+  citationButton.title = "Jump to the cited source in the paper";
+  citationButton.dataset.loading = "false";
+  citationButton.dataset.citationSyncKey = `${normalizeCitationLabel(baseSourceLabel)}\u241f${normalizeQuoteKey(params.quoteText)}`;
+  setCitationButtonLabel(
+    citationButton,
+    displayCitationLabel,
+    params.extractedCitation.pageLabel,
+  );
+  if (params.extractedCitation.pageLabel) {
+    citationButton.dataset.citationPageLabel =
+      params.extractedCitation.pageLabel;
+  }
+
+  const handleCitationClick = () => {
+    void resolveAndNavigateAssistantCitation({
+      body: params.body,
+      button: citationButton,
+      baseSourceLabel,
+      displayCitationLabel,
+      candidates: params.candidates,
+      panelItem: params.panelItem,
+      quoteText: params.quoteText,
+    });
+  };
+
+  citationButton.addEventListener("mousedown", (event: Event) => {
+    const mouse = event as MouseEvent;
+    if (typeof mouse.button === "number" && mouse.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleCitationClick();
+  });
+  citationButton.addEventListener("click", (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  citationButton.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleCitationClick();
+  });
+
+  void resolvePageForCitationButton({
+    button: citationButton,
+    displayCitationLabel,
+    candidates: params.candidates,
+    panelItem: params.panelItem,
+    extractedCitation: params.extractedCitation,
+    quoteText: params.quoteText,
+  });
+
+  return citationButton;
+}
+
+function shouldSkipInlineCitationNode(element: Element | null): boolean {
+  if (!element) return true;
+  if (
+    element.closest(
+      "blockquote, button, a, code, pre, .llm-paper-citation-row, .llm-paper-citation-link",
+    )
+  ) {
+    return true;
+  }
+  const tag = element.tagName.toLowerCase();
+  if (tag === "script" || tag === "style") return true;
+  return false;
+}
+
+function decorateInlineCitationNodes(params: {
+  body: Element;
+  bubble: HTMLDivElement;
+  ownerDoc: Document;
+  panelItem: Zotero.Item;
+  candidates: AssistantCitationPaperCandidate[];
+}): void {
+  const targets: Text[] = [];
+  const walk = (node: Node): void => {
+    if (node.nodeType === 3) {
+      const textNode = node as Text;
+      const parent = textNode.parentElement;
+      if (!parent || shouldSkipInlineCitationNode(parent)) return;
+      const text = textNode.nodeValue || "";
+      if (text.length < 8) return;
+      const mentions = extractInlineCitationMentions(text);
+      if (mentions.length) targets.push(textNode);
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const element = node as Element;
+    if (shouldSkipInlineCitationNode(element)) return;
+    let child: Node | null = node.firstChild;
+    while (child) {
+      const next: Node | null = child.nextSibling;
+      walk(child);
+      child = next;
+    }
+  };
+  walk(params.bubble);
+  ztoolkit.log(
+    "LLM citation decoration: inline text targets =",
+    targets.length,
+  );
+
+  for (const textNode of targets) {
+    const text = textNode.nodeValue || "";
+    const mentions = extractInlineCitationMentions(text);
+    if (!mentions.length) continue;
+    const frag = params.ownerDoc.createDocumentFragment();
+    let cursor = 0;
+    let decoratedCount = 0;
+    for (const mention of mentions) {
+      if (mention.start < cursor) continue;
+      const prefix = text.slice(cursor, mention.start);
+      if (prefix) {
+        frag.appendChild(params.ownerDoc.createTextNode(prefix));
+      }
+
+      const matchingCandidates = resolveMatchingCandidatesForExtractedCitation(
+        mention.extractedCitation,
+        params.candidates,
+      );
+      const citationButton = createCitationButton({
+        ownerDoc: params.ownerDoc,
+        body: params.body,
+        panelItem: params.panelItem,
+        candidates: matchingCandidates,
+        extractedCitation: mention.extractedCitation,
+        quoteText: "",
+        inline: true,
+      });
+      frag.appendChild(citationButton);
+      cursor = mention.end;
+      decoratedCount += 1;
+    }
+    if (!decoratedCount) continue;
+    if (cursor < text.length) {
+      frag.appendChild(params.ownerDoc.createTextNode(text.slice(cursor)));
+    }
+    textNode.parentNode?.replaceChild(frag, textNode);
+  }
+}
+
 export function decorateAssistantCitationLinks(params: {
   body: Element;
   panelItem: Zotero.Item;
@@ -1304,8 +1923,8 @@ export function decorateAssistantCitationLinks(params: {
   }
 
   // Collect paper context candidates from the user message and panel item.
-  // This list may be empty (e.g. when no paper contexts were forwarded).
-  // Buttons are still created in that case — the
+  // This list may be empty (e.g. when the agent is disabled and no paper
+  // contexts were forwarded).  Buttons are still created in that case — the
   // click handler will dynamically resolve a fallback from the panel item.
   const candidates = collectAssistantCitationCandidates(
     params.panelItem,
@@ -1326,28 +1945,21 @@ export function decorateAssistantCitationLinks(params: {
     params.bubble.childElementCount,
   );
   for (const blockquote of blockquotes) {
-    const quoteText = sanitizeText(blockquote.textContent || "").trim();
+    let quoteText = sanitizeText(blockquote.textContent || "").trim();
     if (!quoteText) continue;
-    const citationEl = getNextElementSibling(blockquote);
-    if (!citationEl) {
-      ztoolkit.log(
-        "LLM citation decoration: no sibling for blockquote, text =",
-        (blockquote.textContent || "").slice(0, 60),
-      );
-      continue;
-    }
+    let citationEl = getNextElementSibling(blockquote);
 
     // Primary attempt: entire element is a standalone citation label.
-    let extractedCitation = extractStandalonePaperSourceLabel(
-      citationEl.textContent || "",
-    );
+    let extractedCitation = citationEl
+      ? extractStandalonePaperSourceLabel(citationEl.textContent || "")
+      : null;
 
     // Edge-case fallback: the element may start with a citation label followed
     // by continuation paragraph text on subsequent lines (no blank line between
     // them in the LLM output → single <p> block in rendered HTML).
     // We extract only the first non-empty line and re-attempt parsing.
     let citationRemainder: string | null = null;
-    if (!extractedCitation) {
+    if (!extractedCitation && citationEl) {
       const rawLines = (citationEl.textContent || "").split("\n");
       const firstLine = sanitizeText(rawLines[0] || "").trim();
       if (firstLine) {
@@ -1360,10 +1972,47 @@ export function decorateAssistantCitationLinks(params: {
         }
       }
     }
+
+    // Some model outputs put the citation on the final line *inside* the same
+    // blockquote. Recover by splitting a trailing citation line from quote text.
     if (!extractedCitation) {
+      const tailMatch = extractBlockquoteTailCitation(
+        blockquote.textContent || "",
+      );
+      if (tailMatch) {
+        extractedCitation = tailMatch.extractedCitation;
+        quoteText = tailMatch.quoteText;
+        const syntheticCitationEl = ownerDoc.createElement("p");
+        syntheticCitationEl.textContent = extractedCitation.sourceLabel;
+        const insertParent = blockquote.parentElement;
+        if (insertParent) {
+          insertParent.insertBefore(
+            syntheticCitationEl,
+            citationEl || blockquote.nextSibling,
+          );
+          citationEl = syntheticCitationEl;
+        }
+      }
+    }
+
+    if (!extractedCitation) {
+      if (!citationEl) {
+        ztoolkit.log(
+          "LLM citation decoration: no sibling citation and no inline tail citation for blockquote, text =",
+          (blockquote.textContent || "").slice(0, 80),
+        );
+      } else {
+        ztoolkit.log(
+          "LLM citation decoration: sibling text not a citation, text =",
+          JSON.stringify((citationEl.textContent || "").slice(0, 80)),
+        );
+      }
+      continue;
+    }
+
+    if (!citationEl) {
       ztoolkit.log(
-        "LLM citation decoration: sibling text not a citation, text =",
-        JSON.stringify((citationEl.textContent || "").slice(0, 80)),
+        "LLM citation decoration: citation parsed but no target element available",
       );
       continue;
     }
@@ -1373,87 +2022,19 @@ export function decorateAssistantCitationLinks(params: {
     );
 
     // Try to match the citation label against known paper candidates.
-    const matchingCandidates: AssistantCitationPaperCandidate[] =
-      candidates.filter(
-        (candidate) =>
-          candidate.normalizedSourceLabel ===
-            extractedCitation.normalizedSourceLabel ||
-          candidate.normalizedCitationLabel ===
-            extractedCitation.normalizedCitationLabel,
-      );
-    if (!matchingCandidates.length && candidates.length) {
-      // Fuzzy fallback: match by author surname only
-      const citationAuthorKey = extractAuthorKey(
-        extractedCitation.normalizedCitationLabel,
-      );
-      if (citationAuthorKey) {
-        const fuzzy = candidates.filter(
-          (candidate) =>
-            extractAuthorKey(candidate.normalizedCitationLabel) ===
-            citationAuthorKey,
-        );
-        if (fuzzy.length) {
-          matchingCandidates.push(...fuzzy);
-        }
-      }
-    }
-    if (!matchingCandidates.length && candidates.length === 1) {
-      // Single-candidate fallback: if only one paper in context, use it
-      matchingCandidates.push(candidates[0]);
-    }
+    const matchingCandidates = resolveMatchingCandidatesForExtractedCitation(
+      extractedCitation,
+      candidates,
+    );
     // NOTE: matchingCandidates may still be empty here.  That is fine — the
     // click handler will resolve fallback candidates dynamically.
-
-    const baseSourceLabel = extractedCitation.sourceLabel;
-    const displayCitationLabel = extractedCitation.displayCitationLabel;
-    const citationButton = ownerDoc.createElement(
-      "button",
-    ) as HTMLButtonElement;
-    citationButton.type = "button";
-    citationButton.className =
-      "llm-paper-citation-link llm-paper-context-chip-header";
-    citationButton.title = "Jump to the cited source in the paper";
-    citationButton.dataset.loading = "false";
-    citationButton.dataset.citationSyncKey = `${normalizeCitationLabel(baseSourceLabel)}\u241f${normalizeQuoteKey(quoteText)}`;
-    setCitationButtonLabel(
-      citationButton,
-      displayCitationLabel,
-      extractedCitation.pageLabel,
-    );
-    // Persist the explicit page label (if any) so the click handler can navigate
-    // directly without a PDF text-match search — prevents wrong-paper navigation.
-    if (extractedCitation.pageLabel) {
-      citationButton.dataset.citationPageLabel = extractedCitation.pageLabel;
-    }
-
-    const handleCitationClick = () => {
-      void resolveAndNavigateAssistantCitation({
-        body: params.body,
-        button: citationButton,
-        baseSourceLabel,
-        displayCitationLabel,
-        candidates: matchingCandidates,
-        panelItem: params.panelItem,
-        quoteText,
-      });
-    };
-
-    citationButton.addEventListener("mousedown", (event: Event) => {
-      const mouse = event as MouseEvent;
-      if (typeof mouse.button === "number" && mouse.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      handleCitationClick();
-    });
-    citationButton.addEventListener("click", (event: Event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    citationButton.addEventListener("keydown", (event: KeyboardEvent) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      event.stopPropagation();
-      handleCitationClick();
+    const citationButton = createCitationButton({
+      ownerDoc,
+      body: params.body,
+      panelItem: params.panelItem,
+      candidates: matchingCandidates,
+      extractedCitation,
+      quoteText,
     });
 
     citationEl.classList.add(
@@ -1475,14 +2056,13 @@ export function decorateAssistantCitationLinks(params: {
         citationEl.nextSibling,
       );
     }
-
-    void resolvePageForCitationButton({
-      button: citationButton,
-      displayCitationLabel,
-      candidates: matchingCandidates,
-      panelItem: params.panelItem,
-      extractedCitation,
-      quoteText,
-    });
   }
+
+  decorateInlineCitationNodes({
+    body: params.body,
+    bubble: params.bubble,
+    ownerDoc,
+    panelItem: params.panelItem,
+    candidates,
+  });
 }

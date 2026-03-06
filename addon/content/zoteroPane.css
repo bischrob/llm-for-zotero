@@ -2050,6 +2050,24 @@
 }
 
 .llm-bubble.assistant
+  .llm-paper-citation-link.llm-paper-citation-link-inline
+{
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.llm-bubble.assistant
+  .llm-paper-citation-link.llm-paper-citation-link-inline
+  .llm-paper-context-chip-label {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-decoration: inherit;
+  text-underline-offset: inherit;
+}
+
+.llm-bubble.assistant
   .llm-paper-citation-link:hover
   .llm-paper-context-chip-label {
   color: var(--fill-primary);
