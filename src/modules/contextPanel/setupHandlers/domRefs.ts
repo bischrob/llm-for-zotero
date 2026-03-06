@@ -39,8 +39,6 @@ export type PanelDomRefs = {
   slashMenu: HTMLDivElement | null;
   slashUploadOption: HTMLButtonElement | null;
   slashReferenceOption: HTMLButtonElement | null;
-  slashLocateSelectionOption: HTMLButtonElement | null;
-  slashLocateQuoteOption: HTMLButtonElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
   previewStrip: HTMLDivElement | null;
@@ -70,7 +68,6 @@ export type PanelDomRefs = {
   retryModelMenu: HTMLDivElement | null;
   status: HTMLElement | null;
   tokenUsageEl: HTMLElement | null;
-  liveLocateDemo: HTMLDivElement | null;
   chatBox: HTMLDivElement | null;
   panelRoot: HTMLDivElement | null;
 };
@@ -177,12 +174,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     slashReferenceOption: body.querySelector(
       "#llm-slash-reference-option",
     ) as HTMLButtonElement | null,
-    slashLocateSelectionOption: body.querySelector(
-      "#llm-slash-locate-selection-option",
-    ) as HTMLButtonElement | null,
-    slashLocateQuoteOption: body.querySelector(
-      "#llm-slash-locate-quote-option",
-    ) as HTMLButtonElement | null,
     imagePreview: body.querySelector(
       "#llm-image-preview",
     ) as HTMLDivElement | null,
@@ -262,9 +253,6 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     ) as HTMLDivElement | null,
     status: body.querySelector("#llm-status") as HTMLElement | null,
     tokenUsageEl: body.querySelector("#llm-token-usage") as HTMLElement | null,
-    liveLocateDemo: body.querySelector(
-      "#llm-live-locate-demo",
-    ) as HTMLDivElement | null,
     chatBox: body.querySelector("#llm-chat-box") as HTMLDivElement | null,
     panelRoot: body.querySelector("#llm-main") as HTMLDivElement | null,
   };

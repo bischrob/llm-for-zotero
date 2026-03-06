@@ -2967,41 +2967,6 @@
   display: none;
 }
 
-.llm-live-locate-demo {
-  margin-top: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--stroke-secondary);
-  border-radius: 10px;
-  background: color-mix(
-    in srgb,
-    var(--material-background) 88%,
-    var(--fill-quinary)
-  );
-  color: var(--fill-secondary);
-  font-size: var(--llm-fs-11);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.llm-live-locate-demo[data-demo-state="resolved"] {
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 35%,
-    var(--stroke-secondary)
-  );
-}
-
-.llm-live-locate-demo[data-demo-state="ambiguous"],
-.llm-live-locate-demo[data-demo-state="selection-too-short"] {
-  border-color: color-mix(in srgb, #f39c12 45%, var(--stroke-secondary));
-}
-
-.llm-live-locate-demo[data-demo-state="not-found"],
-.llm-live-locate-demo[data-demo-state="unavailable"] {
-  border-color: color-mix(in srgb, #e74c3c 38%, var(--stroke-secondary));
-}
-
 /* Scrollbar Styling */
 .llm-messages::-webkit-scrollbar,
 .llm-context::-webkit-scrollbar {

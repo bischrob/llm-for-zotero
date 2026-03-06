@@ -400,34 +400,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       textContent: "Select references",
     },
   );
-  const slashLocateSelectionBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-locate-selection-option",
-      type: "button",
-      textContent: "Locate selection demo",
-      title: "Resolve the current PDF selection against the live reader text",
-    },
-  );
-  const slashLocateQuoteBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-locate-quote-option",
-      type: "button",
-      textContent: "Locate quote demo",
-      title: "Resolve the current input quote against the open PDF",
-    },
-  );
-  slashMenu.append(
-    slashUploadBtn,
-    slashReferenceBtn,
-    slashLocateSelectionBtn,
-    slashLocateQuoteBtn,
-  );
+  slashMenu.append(slashUploadBtn, slashReferenceBtn);
   container.appendChild(slashMenu);
 
   // Retry model menu (opened from latest assistant retry action)
@@ -736,10 +709,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     id: "llm-token-usage",
   });
   statusBar.append(statusLine, tokenUsage);
-  const liveLocateDemo = createElement(doc, "div", "llm-live-locate-demo", {
-    id: "llm-live-locate-demo",
-  });
-  liveLocateDemo.style.display = "none";
 
   actionsLeft.append(
     uploadSlot,
@@ -753,7 +722,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   composeArea.appendChild(actionsRow);
   container.appendChild(inputSection);
   container.appendChild(statusBar);
-  container.appendChild(liveLocateDemo);
   body.appendChild(container);
 }
 

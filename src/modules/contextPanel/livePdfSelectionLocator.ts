@@ -1356,7 +1356,7 @@ async function searchFindControllerForQuery(
   }
 
   eventBus.dispatch("find", {
-    source: { source: "llm-live-quote-demo" },
+    source: { source: "llm-live-quote-locator" },
     type: "",
     query,
     phraseSearch: true,
