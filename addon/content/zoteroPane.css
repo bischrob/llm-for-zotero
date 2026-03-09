@@ -2075,6 +2075,20 @@
   opacity: 0.7;
 }
 
+.llm-agent-hitl-input-code {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: var(--llm-fs-10);
+  white-space: pre;
+}
+
 .llm-agent-hitl-actions {
   display: flex;
   flex-wrap: wrap;

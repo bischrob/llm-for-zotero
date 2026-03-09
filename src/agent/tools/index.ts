@@ -9,6 +9,7 @@ import { createReadPaperExcerptTool } from "./read/readPaperExcerpt";
 import { createSearchLibraryItemsTool } from "./read/searchLibraryItems";
 import { createReadAttachmentTextTool } from "./read/readAttachmentText";
 import { createSaveAnswerToNoteTool } from "./write/saveAnswerToNote";
+import { createEditArticleMetadataTool } from "./write/editArticleMetadata";
 
 type BuiltInAgentToolDeps = {
   zoteroGateway: ZoteroGateway;
@@ -32,5 +33,6 @@ export function createBuiltInToolRegistry(
   registry.register(createSearchLibraryItemsTool(deps.zoteroGateway));
   registry.register(createReadAttachmentTextTool());
   registry.register(createSaveAnswerToNoteTool(deps.zoteroGateway));
+  registry.register(createEditArticleMetadataTool(deps.zoteroGateway));
   return registry;
 }

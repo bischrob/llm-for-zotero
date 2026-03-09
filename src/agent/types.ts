@@ -32,6 +32,7 @@ export type PendingWriteAction = {
   cancelLabel: string;
   editableContent?: string;
   contentLabel?: string;
+  editorMode?: "plain" | "json";
   saveTargets?: Array<{
     id: string;
     label: string;

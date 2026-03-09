@@ -52,6 +52,7 @@ const AGENT_TRACE_TOOL_LABELS: Record<string, string> = {
   search_library_items: "Search Library",
   read_attachment_text: "Read Attachment",
   save_answer_to_note: "Save to Note",
+  edit_article_metadata: "Edit Metadata",
 };
 
 type AgentRunEventPayload = AgentRunEventRecord["payload"];
@@ -187,9 +188,12 @@ function renderPendingWriteActionCard(
   card.appendChild(contentLabel);
 
   const editor = doc.createElement("textarea");
-  editor.className = "llm-agent-hitl-input";
+  editor.className =
+    pending.action.editorMode === "json"
+      ? "llm-agent-hitl-input llm-agent-hitl-input-code"
+      : "llm-agent-hitl-input";
   editor.value = getPendingWriteEditableContent(pending.action);
-  editor.spellcheck = true;
+  editor.spellcheck = pending.action.editorMode !== "json";
   const resizeEditor = () => {
     editor.style.height = "auto";
     editor.style.height = `${Math.min(editor.scrollHeight, 260)}px`;
@@ -426,6 +430,12 @@ function summarizeAgentTraceToolCall(name: string): AgentTraceSummaryRow {
         icon: "✎",
         text: "Preparing a note draft",
       };
+    case "edit_article_metadata":
+      return {
+        kind: "tool",
+        icon: "✎",
+        text: "Preparing metadata updates for the article",
+      };
     default:
       return {
         kind: "tool",
@@ -443,6 +453,13 @@ function summarizeAgentTraceConfirmationRequest(
       kind: "plan",
       icon: "…",
       text: "Waiting for your approval before saving the note",
+    };
+  }
+  if (toolName === "edit_article_metadata") {
+    return {
+      kind: "plan",
+      icon: "…",
+      text: "Waiting for your approval before applying the metadata changes",
     };
   }
   return {
@@ -465,6 +482,8 @@ function summarizeAgentTraceConfirmationResolved(
       text:
         toolName === "save_answer_to_note"
           ? "Approval received — saving the note"
+          : toolName === "edit_article_metadata"
+            ? "Approval received — applying the metadata changes"
           : "Approval received — continuing",
     };
   }
@@ -474,6 +493,8 @@ function summarizeAgentTraceConfirmationResolved(
     text:
       toolName === "save_answer_to_note"
         ? "Note save cancelled"
+        : toolName === "edit_article_metadata"
+          ? "Metadata changes cancelled"
         : "Action cancelled",
   };
 }
@@ -569,7 +590,22 @@ function summarizeAgentTraceToolResult(
             ? "Saved the note to the current item"
             : status === "standalone_created"
               ? "Saved the note as a standalone note"
-              : "Saved the note",
+            : "Saved the note",
+      };
+    }
+    case "edit_article_metadata": {
+      const changedFields = Array.isArray(normalized?.changedFields)
+        ? normalized.changedFields
+        : [];
+      return {
+        kind: "ok",
+        icon: "✓",
+        text:
+          changedFields.length > 0
+            ? `Applied ${changedFields.length} metadata change${
+                changedFields.length === 1 ? "" : "s"
+              }`
+            : "Applied the metadata changes",
       };
     }
     default:
@@ -603,6 +639,11 @@ function buildInitialAgentMessage(
       ? "I’ve got your request and the attached context. I’ll draft the note first, then show it to you before I save anything."
       : "I’ve got your request. I’ll draft the note first, then show it to you before I save anything.";
   }
+  if (firstToolName === "edit_article_metadata") {
+    return requestChips.length
+      ? "I’ve got your request and the attached context. I’ll review the article metadata first, then show you the proposed changes before I apply them."
+      : "I’ve got your request. I’ll review the article metadata first, then show you the proposed changes before I apply them.";
+  }
   return requestChips.length
     ? "I’ve got your question and the attached context. I’m checking that first so I can ground the answer properly."
     : "I’ve got your question. I’m checking the current context first.";
@@ -628,6 +669,8 @@ function buildToolFollowUpMessage(
         return "I’ve narrowed it down, so I’m opening the attached file next.";
       case "save_answer_to_note":
         return "I have what I need, so I’m turning it into a note draft next.";
+      case "edit_article_metadata":
+        return "I know what should change now, so I’m preparing the metadata updates next.";
       default:
         return `I’m ready for the next step, so I’m using ${formatAgentTraceToolName(
           nextPayload.name,
@@ -637,6 +680,8 @@ function buildToolFollowUpMessage(
   if (nextPayload.type === "confirmation_required") {
     return nextPayload.action.toolName === "save_answer_to_note"
       ? "I’ve prepared the draft. Review or edit it below, then choose where you want me to save it."
+      : nextPayload.action.toolName === "edit_article_metadata"
+        ? "I’ve prepared the metadata updates. Review or edit them below, then apply them if they look right."
       : "I’m ready for the next action. Review it below and approve if you want me to continue.";
   }
   if (nextPayload.type === "message_delta") {
@@ -748,6 +793,8 @@ function buildAgentTraceDisplayItems(
           text:
             entry.payload.action.toolName === "save_answer_to_note"
               ? "I drafted the note. Review or edit it below, then tell me where you want me to save it."
+              : entry.payload.action.toolName === "edit_article_metadata"
+                ? "I drafted the metadata updates. Review or edit them below, then apply them if they look right."
               : "I’m ready for the next action, but I need your approval before I continue.",
         });
         items.push({
@@ -772,10 +819,16 @@ function buildAgentTraceDisplayItems(
             ? confirmationToolNames.get(entry.payload.requestId) ===
               "save_answer_to_note"
               ? "Thanks — I’m saving the edited draft now."
+              : confirmationToolNames.get(entry.payload.requestId) ===
+                  "edit_article_metadata"
+                ? "Thanks — I’m applying those metadata changes now."
               : "Thanks — I’m continuing with that action now."
             : confirmationToolNames.get(entry.payload.requestId) ===
                 "save_answer_to_note"
               ? "No problem — I left the note unchanged."
+              : confirmationToolNames.get(entry.payload.requestId) ===
+                  "edit_article_metadata"
+                ? "No problem — I left the metadata unchanged."
               : "No problem — I stopped there.",
         });
         break;

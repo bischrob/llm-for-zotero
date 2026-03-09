@@ -9,7 +9,7 @@ export function createGetActiveContextTool(
     spec: {
       name: "get_active_context",
       description:
-        "Return the current Zotero paper context, selected text, attachments, and active reader metadata.",
+        "Return the current Zotero paper context, selected text, attachments, active reader metadata, and editable bibliographic metadata for the active article.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -24,10 +24,17 @@ export function createGetActiveContextTool(
         zoteroGateway.getItem(context.request.activeItemId) || context.item;
       const activeContextItem = zoteroGateway.getActiveContextItem(activeItem);
       const activePaperContext = zoteroGateway.getActivePaperContext(activeItem);
+      const activeBibliographicItem = zoteroGateway.resolveMetadataItem({
+        request: context.request,
+        item: activeItem,
+      });
       return {
         activeItemId: activeItem?.id,
         activeContextItemId: activeContextItem?.id,
+        activeBibliographicItemId: activeBibliographicItem?.id,
         activePaperContext,
+        activeItemMetadata:
+          zoteroGateway.getEditableArticleMetadata(activeBibliographicItem),
         selectedTexts: context.request.selectedTexts || [],
         selectedPaperContexts: context.request.selectedPaperContexts || [],
         pinnedPaperContexts: context.request.pinnedPaperContexts || [],
