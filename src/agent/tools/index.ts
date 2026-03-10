@@ -17,6 +17,7 @@ import { createAuditArticleMetadataTool } from "./read/auditArticleMetadata";
 import { createSearchPdfPagesTool } from "./read/searchPdfPages";
 import { createPreparePdfPagesForModelTool } from "./read/preparePdfPagesForModel";
 import { createPreparePdfFileForModelTool } from "./read/preparePdfFileForModel";
+import { createCaptureReaderViewTool } from "./read/captureReaderView";
 import { createComparePapersStructuredTool } from "./read/comparePapersStructured";
 import { createSaveAnswerToNoteTool } from "./write/saveAnswerToNote";
 import { createApplyTagsTool } from "./write/applyTags";
@@ -62,6 +63,7 @@ export function createBuiltInToolRegistry(
   registry.register(createSearchPdfPagesTool(deps.pdfPageService));
   registry.register(createPreparePdfPagesForModelTool(deps.pdfPageService));
   registry.register(createPreparePdfFileForModelTool(deps.pdfPageService));
+  registry.register(createCaptureReaderViewTool(deps.pdfPageService));
   registry.register(createReadAttachmentTextTool());
   registry.register(
     createComparePapersStructuredTool(

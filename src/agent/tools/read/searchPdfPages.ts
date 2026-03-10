@@ -41,10 +41,9 @@ export function createSearchPdfPagesTool(
         ),
       instruction: [
         "When the user asks about a figure, equation, table, page layout, or any PDF-specific visual detail, use the PDF tools instead of guessing from text alone.",
-        "Start with search_pdf_pages to find relevant pages.",
-        "Use prepare_pdf_pages_for_model to send selected PDF pages as images for visual inspection.",
-        "If the user explicitly names page numbers, you may send those pages directly.",
-        "If the pages are auto-selected by the tool, wait for approval before sending them.",
+        "If the user names a specific numbered equation, figure, or table (e.g. 'explain equation 3', 'what is Figure 2', 'eq. 4') OR refers to something visible in the reader ('this equation', 'explain this', 'what I see'), call capture_reader_view — it captures exactly the page open in the reader, so it cannot pick the wrong page the way keyword search can. It handles its own confirmation; after the result returns, the page text and image are in the follow-up message — read them and answer directly.",
+        "Only use search_pdf_pages when the user does NOT have a PDF open in the reader and is asking a general question that requires locating a page (e.g. 'find the section about plasticity').",
+        "If the user explicitly names page numbers, call prepare_pdf_pages_for_model directly without search.",
         "Only use prepare_pdf_file_for_model when the user explicitly asks to inspect the entire PDF or whole document.",
       ].join("\n"),
     },

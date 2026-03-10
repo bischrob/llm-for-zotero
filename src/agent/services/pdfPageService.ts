@@ -818,6 +818,7 @@ export class PdfPageService {
       contentHash: string;
     }>;
     artifacts: AgentToolArtifact[];
+    pageTexts: Record<number, string>;
   }> {
     const target = await this.resolveTarget(params);
     if (target.source !== "library" || !target.contextItemId) {
@@ -939,11 +940,190 @@ export class PdfPageService {
       });
     }
 
+    const pageTexts: Record<number, string> = {};
+    try {
+      const textCache = await warmPageTextCache(reader);
+      const textPages = textCache?.pages || [];
+      for (const pageIndex of orderedPages) {
+        const entry = textPages.find(
+          (p: { pageIndex: number; text: string }) => p.pageIndex === pageIndex,
+        );
+        if (entry?.text) {
+          pageTexts[pageIndex] = sanitizeText(entry.text);
+        }
+      }
+    } catch {
+      // non-fatal — images are the primary source
+    }
+
     return {
       target,
       pages: preparedPages,
       artifacts,
+      pageTexts,
     };
+  }
+
+  async captureActiveView(params: {
+    request: AgentRuntimeRequest;
+    neighborPages?: number;
+  }): Promise<{
+    target: ResolvedPdfTarget;
+    capturedPage: {
+      pageIndex: number;
+      pageLabel: string;
+      imagePath: string;
+      contentHash: string;
+    };
+    artifacts: AgentToolArtifact[];
+    pageText: string;
+  }> {
+    const reader = getActiveReaderForSelectedTab();
+    if (!reader) {
+      throw new Error(
+        "No active PDF reader is open. Please open a PDF in the Zotero reader first.",
+      );
+    }
+    const app = await waitForPdfDocument(reader, 1500);
+    if (!app?.pdfDocument) {
+      throw new Error(
+        "Could not access the PDF document in the active reader.",
+      );
+    }
+
+    const rawPageNumber = Number(
+      app?.pdfViewer?.currentPageNumber ||
+        app?.pdfViewer?.currentPageLabel ||
+        app?.page ||
+        1,
+    );
+    const currentPageIndex = Math.max(
+      0,
+      Number.isFinite(rawPageNumber) ? Math.floor(rawPageNumber) - 1 : 0,
+    );
+
+    const readerItemId = getReaderItemId(reader);
+    if (!readerItemId) {
+      throw new Error(
+        "Could not identify the active PDF item from the reader.",
+      );
+    }
+    const target = await this.resolveTarget({
+      request: params.request,
+      contextItemId: readerItemId,
+    });
+
+    const neighborPages = Number.isFinite(params.neighborPages)
+      ? Math.max(0, Math.min(1, Math.floor(params.neighborPages as number)))
+      : 0;
+    const allPages = new Set<number>();
+    allPages.add(currentPageIndex);
+    for (let offset = 1; offset <= neighborPages; offset += 1) {
+      allPages.add(Math.max(0, currentPageIndex - offset));
+      allPages.add(currentPageIndex + offset);
+    }
+    const orderedPages = Array.from(allPages).sort((left, right) => left - right);
+
+    const preparedPages: Array<{
+      pageIndex: number;
+      pageLabel: string;
+      imagePath: string;
+      contentHash: string;
+    }> = [];
+    const artifacts: AgentToolArtifact[] = [];
+
+    for (const pageIndex of orderedPages) {
+      const pageLabel = `${pageIndex + 1}`;
+      await navigateReaderToPage(reader, pageIndex, pageLabel);
+      let bytes = await captureRenderedReaderPage(app, reader, pageIndex);
+      if (!bytes) {
+        const canvasDoc =
+          getReaderDocument(reader) || Zotero.getMainWindow?.()?.document;
+        if (!canvasDoc) {
+          throw new Error("No document available for PDF page rendering");
+        }
+        const pdfDocument = unwrapWrappedJsObject(
+          app.pdfDocument as { getPage?: (pageNumber: number) => Promise<unknown> },
+        );
+        if (typeof pdfDocument?.getPage !== "function") {
+          throw new Error("Could not access the PDF document page loader");
+        }
+        const pdfPage = resolveRenderablePdfPage(
+          await pdfDocument.getPage(pageIndex + 1),
+        );
+        if (!pdfPage) {
+          throw new Error(
+            `Could not access a renderable PDF.js page for page ${pageIndex + 1}`,
+          );
+        }
+        const viewport = pdfPage.getViewport({ scale: 1.8 });
+        const canvas = canvasDoc.createElement("canvas") as HTMLCanvasElement;
+        canvas.width = Math.max(1, Math.ceil(viewport.width));
+        canvas.height = Math.max(1, Math.ceil(viewport.height));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          throw new Error("Could not create a canvas for PDF rendering");
+        }
+        const renderTask = pdfPage.render({
+          canvasContext: context,
+          viewport,
+        });
+        if (
+          renderTask &&
+          typeof renderTask === "object" &&
+          "promise" in renderTask &&
+          renderTask.promise
+        ) {
+          await renderTask.promise;
+        } else if (
+          renderTask &&
+          (typeof renderTask === "object" || typeof renderTask === "function") &&
+          "then" in renderTask &&
+          typeof renderTask.then === "function"
+        ) {
+          await renderTask;
+        }
+        bytes = await canvasToBytes(canvas);
+      }
+      const persisted = await persistAttachmentBlob(
+        `${sanitizeText(target.attachmentName || target.title || "pdf")}-page-${pageIndex + 1}.png`,
+        bytes,
+      );
+      preparedPages.push({
+        pageIndex,
+        pageLabel,
+        imagePath: persisted.storedPath,
+        contentHash: persisted.contentHash,
+      });
+      artifacts.push({
+        kind: "image",
+        mimeType: "image/png",
+        storedPath: persisted.storedPath,
+        contentHash: persisted.contentHash,
+        title: `${target.title} — page ${pageLabel}`,
+        pageIndex,
+        pageLabel,
+        paperContext: target.paperContext,
+      });
+    }
+
+    // Extract text layer for current page so callers can ground the model
+    // even when the image isn't rendered by the model provider.
+    let pageText = "";
+    try {
+      const textCache = await warmPageTextCache(reader);
+      const entry = textCache?.pages.find(
+        (p: { pageIndex: number; text: string }) => p.pageIndex === currentPageIndex,
+      );
+      pageText = sanitizeText(entry?.text ?? "");
+    } catch {
+      // non-fatal — image is the primary source
+    }
+
+    const capturedPage =
+      preparedPages.find((page) => page.pageIndex === currentPageIndex) ||
+      preparedPages[0];
+    return { target, capturedPage, artifacts, pageText };
   }
 
   async preparePdfFileForModel(params: PreparePdfFileParams): Promise<{

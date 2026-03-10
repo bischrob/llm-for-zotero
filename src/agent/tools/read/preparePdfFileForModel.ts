@@ -73,29 +73,12 @@ export function createPreparePdfFileForModelTool(
       });
       return {
         toolName: "prepare_pdf_file_for_model",
-        title: `Review whole-PDF input for ${prepared.target.title}`,
+        title: `Send whole PDF — ${prepared.target.title}`,
         description:
-          "This will send the entire PDF file to the model. Use this only when full-document inspection is necessary.",
-        confirmLabel: "Apply",
+          "The entire PDF file will be sent to the model. Use this only when full-document inspection is necessary.",
+        confirmLabel: "Send to model",
         cancelLabel: "Cancel",
-        fields: [
-          {
-            type: "review_table",
-            id: "review",
-            rows: [
-              {
-                key: "pdf",
-                label: "PDF",
-                after: prepared.target.title,
-              },
-              {
-                key: "scope",
-                label: "Scope",
-                after: "Whole document",
-              },
-            ],
-          },
-        ],
+        fields: [],
       };
     },
     execute: async (input, context) => {

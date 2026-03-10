@@ -1,4 +1,4 @@
-import type { AgentToolDefinition } from "../../types";
+import type { AgentModelContentPart, AgentToolDefinition } from "../../types";
 import {
   formatPageSelectionValue,
   parsePageSelectionText,
@@ -12,6 +12,19 @@ import {
   type PdfTargetArgs,
 } from "./pdfToolShared";
 import { fail, ok } from "../shared";
+import { readAttachmentBytes } from "../../../modules/contextPanel/attachmentStorage";
+
+function encodeBase64(bytes: Uint8Array): string {
+  let out = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, Math.min(bytes.length, index + chunkSize));
+    out += String.fromCharCode(...chunk);
+  }
+  const btoaFn = (globalThis as typeof globalThis & { btoa?: (s: string) => string }).btoa;
+  if (typeof btoaFn !== "function") throw new Error("btoa unavailable");
+  return btoaFn(out);
+}
 
 function samePageSet(left: number[] | undefined, right: number[] | undefined): boolean {
   const normalizedLeft = Array.from(new Set(left || [])).sort((a, b) => a - b);
@@ -84,10 +97,10 @@ export function createPreparePdfPagesForModelTool(
       });
       return {
         toolName: "prepare_pdf_pages_for_model",
-        title: `Review PDF pages for ${preview.target.title}`,
+        title: `${preview.target.title} — ${formatPageSelectionValue(input.pages || [])}`,
         description:
-          "These pages will be sent to the model as images for visual inspection.",
-        confirmLabel: "Apply",
+          "Review the pages below, then click \"Send to model\" to send them for visual inspection.",
+        confirmLabel: "Send to model",
         cancelLabel: "Cancel",
         fields: [
           {
@@ -106,22 +119,6 @@ export function createPreparePdfPagesForModelTool(
               mimeType: "image/png",
               title: `${preview.target.title} - page ${page.pageLabel}`,
             })),
-          },
-          {
-            type: "review_table",
-            id: "review",
-            rows: [
-              {
-                key: "pdf",
-                label: "PDF",
-                after: preview.target.title,
-              },
-              {
-                key: "pages",
-                label: "Pages",
-                after: formatPageSelectionValue(input.pages || []),
-              },
-            ],
           },
         ],
       };
@@ -164,10 +161,76 @@ export function createPreparePdfPagesForModelTool(
             pageIndex: page.pageIndex,
             pageLabel: page.pageLabel,
           })),
-          transport: "page_images",
+          pageTexts: prepared.pageTexts,
         },
         artifacts: prepared.artifacts,
       };
+    },
+    buildFollowupMessage: async (result) => {
+      if (!result.ok) return null;
+      const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+      if (!artifacts.length) return null;
+
+      const content = result.content as {
+        pages?: Array<{ pageIndex: number; pageLabel: string }>;
+        pageTexts?: Record<number, string>;
+      } | null;
+      const pages = Array.isArray(content?.pages) ? content.pages : [];
+      const pageTexts: Record<number, string> = content?.pageTexts ?? {};
+
+      const pageLabels = pages.map((p) => `page ${p.pageLabel}`).join(", ");
+      const header = pageLabels
+        ? `[PDF ${pageLabels} — extracted text and image${pages.length !== 1 ? "s" : ""} below]`
+        : "[PDF pages — extracted text and images below]";
+
+      const combinedText = pages
+        .map((p) => {
+          const text = pageTexts[p.pageIndex]?.trim();
+          return text
+            ? pages.length > 1
+              ? `--- Page ${p.pageLabel} ---\n${text}`
+              : text
+            : null;
+        })
+        .filter((entry): entry is string => entry !== null)
+        .join("\n\n");
+
+      const textSection = combinedText
+        ? `\n\nExtracted page text:\n"""\n${combinedText}\n"""`
+        : "";
+
+      const parts: AgentModelContentPart[] = [
+        {
+          type: "text",
+          text:
+            [
+              header,
+              "Answer the user's question using ONLY the content shown below.",
+              "Do not use prior knowledge or training data about this paper.",
+            ].join(" ") + textSection,
+        },
+      ];
+
+      for (const artifact of artifacts) {
+        if (artifact.kind !== "image" || !artifact.storedPath || !artifact.mimeType) {
+          continue;
+        }
+        try {
+          const bytes = await readAttachmentBytes(artifact.storedPath);
+          const base64 = encodeBase64(bytes);
+          parts.push({
+            type: "image_url",
+            image_url: {
+              url: `data:${artifact.mimeType};base64,${base64}`,
+              detail: "high",
+            },
+          });
+        } catch {
+          // image load failed — extracted text still provides grounding
+        }
+      }
+
+      return { role: "user", content: parts };
     },
   };
 }
