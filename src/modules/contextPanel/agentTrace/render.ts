@@ -1,8 +1,9 @@
-import { getAgentRuntime } from "../../../agent";
+import { getAgentRuntime, getSharedZoteroGateway } from "../../../agent";
 import type {
   AgentPendingAction,
   AgentPendingField,
   AgentRunEventRecord,
+  AgentToolResultCard,
   AgentTraceChip,
   AgentTraceRequestSummary,
   AgentToolPresentationSummary,
@@ -33,6 +34,10 @@ type AgentTraceDisplayItem =
       type: "action";
       row: AgentTraceSummaryRow;
       chips?: AgentTraceChip[];
+    }
+  | {
+      type: "card_list";
+      cards: AgentToolResultCard[];
     };
 
 type RenderAgentTraceParams = {
@@ -640,6 +645,190 @@ function renderTagAssignmentTableField(
   };
 }
 
+/**
+ * Renders a list of result cards in a HITL-style container.
+ * When any card has an `importIdentifier`, the list becomes selectable
+ * and shows an "Add to Zotero" button that imports checked papers.
+ */
+function renderResultCardList(
+  doc: Document,
+  cards: AgentToolResultCard[],
+): HTMLDivElement {
+  const hasImport = cards.some((c) => Boolean(c.importIdentifier));
+  const container = doc.createElement("div");
+  container.className = hasImport
+    ? "llm-agent-hitl-card llm-search-results"
+    : "llm-agent-hitl-card llm-search-results llm-search-results-readonly";
+
+  const header = doc.createElement("div");
+  header.className = "llm-agent-hitl-header";
+  header.textContent = `${cards.length} paper${cards.length === 1 ? "" : "s"} found online`;
+  container.appendChild(header);
+
+  const list = doc.createElement("div");
+  list.className = "llm-search-results-list";
+  container.appendChild(list);
+
+  const checkboxes: HTMLInputElement[] = [];
+
+  const updateImportButton = () => {
+    if (!hasImport) return;
+    const count = checkboxes.filter((cb) => cb.checked).length;
+    importBtn.textContent =
+      count > 0 ? `Add ${count} to Zotero` : "Select papers to add";
+    importBtn.disabled = count === 0;
+  };
+
+  for (const card of cards) {
+    const row = doc.createElement(hasImport ? "label" : "div");
+    row.className = "llm-search-results-item";
+
+    if (hasImport) {
+      const checkboxWrap = doc.createElement("div");
+      checkboxWrap.className = "llm-search-results-checkbox-wrap";
+      const checkbox = doc.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "llm-search-results-checkbox";
+      checkbox.disabled = !card.importIdentifier;
+      checkbox.addEventListener("change", updateImportButton);
+      checkboxes.push(checkbox);
+      checkboxWrap.appendChild(checkbox);
+      row.appendChild(checkboxWrap);
+    }
+
+    const content = doc.createElement("div");
+    content.className = "llm-search-results-content";
+
+    const titleRow = doc.createElement("div");
+    titleRow.className = "llm-search-results-title-row";
+
+    const titleEl = doc.createElement("span");
+    titleEl.className = "llm-search-results-title";
+    titleEl.textContent = card.title;
+    titleRow.appendChild(titleEl);
+
+    if (card.href) {
+      const openBtn = doc.createElement("a");
+      openBtn.className = "llm-search-results-open";
+      openBtn.textContent = "Open ↗";
+      openBtn.href = card.href;
+      openBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        try {
+          const launch = (Zotero as unknown as { launchURL?: (url: string) => void })
+            .launchURL;
+          if (typeof launch === "function") launch(card.href!);
+        } catch {
+          /* ignore */
+        }
+      });
+      titleRow.appendChild(openBtn);
+    }
+    content.appendChild(titleRow);
+
+    if (card.subtitle) {
+      const subtitleEl = doc.createElement("div");
+      subtitleEl.className = "llm-search-results-subtitle";
+      subtitleEl.textContent = card.subtitle;
+      content.appendChild(subtitleEl);
+    }
+
+    if (card.body) {
+      const bodyEl = doc.createElement("div");
+      bodyEl.className = "llm-search-results-body";
+      bodyEl.textContent = card.body;
+      content.appendChild(bodyEl);
+    }
+
+    if (card.badges?.length) {
+      const badgeRow = doc.createElement("div");
+      badgeRow.className = "llm-search-results-badges";
+      for (const badge of card.badges) {
+        const badgeEl = doc.createElement("span");
+        badgeEl.className = "llm-agent-hitl-badge";
+        badgeEl.textContent = badge;
+        badgeRow.appendChild(badgeEl);
+      }
+      content.appendChild(badgeRow);
+    }
+
+    row.appendChild(content);
+    list.appendChild(row);
+  }
+
+  if (!hasImport) return container;
+
+  // ── Import action row ─────────────────────────────────────────────────────
+  const actions = doc.createElement("div");
+  actions.className = "llm-agent-hitl-actions";
+
+  const importBtn = doc.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "llm-agent-hitl-btn";
+  importBtn.textContent = "Select papers to add";
+  importBtn.disabled = true;
+
+  const selectAllBtn = doc.createElement("button");
+  selectAllBtn.type = "button";
+  selectAllBtn.className = "llm-agent-hitl-btn llm-agent-hitl-btn-alt";
+  selectAllBtn.textContent = "Select all";
+  selectAllBtn.addEventListener("click", () => {
+    for (const cb of checkboxes) {
+      if (!cb.disabled) cb.checked = true;
+    }
+    updateImportButton();
+  });
+
+  const clearBtn = doc.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "llm-agent-hitl-btn llm-agent-hitl-btn-secondary";
+  clearBtn.textContent = "Clear";
+  clearBtn.addEventListener("click", () => {
+    for (const cb of checkboxes) cb.checked = false;
+    updateImportButton();
+  });
+
+  const setAllDisabled = (disabled: boolean) => {
+    importBtn.disabled = disabled;
+    selectAllBtn.disabled = disabled;
+    clearBtn.disabled = disabled;
+    for (const cb of checkboxes) cb.disabled = disabled;
+  };
+
+  importBtn.addEventListener("click", () => {
+    const identifiers = cards
+      .filter((_, i) => checkboxes[i]?.checked)
+      .map((c) => c.importIdentifier)
+      .filter((id): id is string => Boolean(id));
+    if (!identifiers.length) return;
+
+    setAllDisabled(true);
+    importBtn.disabled = true;
+    importBtn.textContent = `Adding ${identifiers.length} paper${identifiers.length === 1 ? "" : "s"}…`;
+
+    getSharedZoteroGateway()
+      .importPapersByIdentifiers(identifiers)
+      .then(({ succeeded, failed }) => {
+        if (succeeded === 0) {
+          importBtn.textContent = `Could not import ${failed} paper${failed === 1 ? "" : "s"}`;
+          setAllDisabled(false);
+        } else if (failed > 0) {
+          importBtn.textContent = `✓ Added ${succeeded} · ${failed} failed`;
+        } else {
+          importBtn.textContent = `✓ Added ${succeeded} to Zotero`;
+        }
+      })
+      .catch(() => {
+        importBtn.textContent = "Import failed — try again";
+        setAllDisabled(false);
+      });
+  });
+
+  actions.append(importBtn, selectAllBtn, clearBtn);
+  container.appendChild(actions);
+  return container;
+}
+
 function renderPendingWriteActionCard(
   doc: Document,
   pending: { requestId: string; action: AgentPendingAction },
@@ -972,7 +1161,11 @@ function buildAgentTraceRequestSummary(
 }
 
 function getToolDefinition(name: string) {
-  return getAgentRuntime().getToolDefinition(name);
+  try {
+    return getAgentRuntime().getToolDefinition(name);
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveToolPresentationSummary(
@@ -1327,6 +1520,19 @@ export function buildAgentTraceDisplayItems(
             type: "action",
             row,
           });
+          if (entry.payload.ok) {
+            try {
+              const cards =
+                getToolDefinition(entry.payload.name)
+                  ?.presentation?.buildResultCards?.(entry.payload.content) ??
+                null;
+              if (cards && cards.length > 0) {
+                items.push({ type: "card_list", cards });
+              }
+            } catch {
+              // card generation errors must not crash the trace
+            }
+          }
           const followUp = buildToolFollowUpMessage(
             entry.payload.name,
             nextPayload,
@@ -1461,6 +1667,11 @@ export function renderAgentTrace({
       messageEl.className = `llm-agent-process-message llm-agent-process-message-${itemEntry.tone}`;
       messageEl.textContent = itemEntry.text;
       list.appendChild(messageEl);
+      continue;
+    }
+
+    if (itemEntry.type === "card_list") {
+      list.appendChild(renderResultCardList(doc, itemEntry.cards));
       continue;
     }
 

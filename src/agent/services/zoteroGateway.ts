@@ -1440,4 +1440,67 @@ export class ZoteroGateway {
       changedFields,
     };
   }
+
+  /**
+   * Import papers into the Zotero library by identifier (DOI or arXiv ID).
+   *
+   * - Plain DOI strings (starting with "10.") → `{ DOI: id }`
+   * - arXiv IDs prefixed with `"arxiv:"` (e.g. `"arxiv:2301.12345"`) → `{ arXiv: id }`
+   *
+   * Uses Zotero's built-in `Translate.Search` API, which fetches metadata from
+   * CrossRef / arXiv translators and saves items to the target library.
+   * Zotero will also attempt to attach a PDF if one is openly available.
+   */
+  async importPapersByIdentifiers(
+    identifiers: string[],
+    libraryID?: number,
+  ): Promise<{ succeeded: number; failed: number }> {
+    let succeeded = 0;
+    let failed = 0;
+    const targetLibraryID =
+      libraryID ??
+      (Zotero as unknown as { Libraries?: { userLibraryID?: number } })
+        .Libraries?.userLibraryID ??
+      1;
+
+    for (const rawId of identifiers) {
+      try {
+        const isArXiv = rawId.startsWith("arxiv:");
+        const identifier: Record<string, string> = isArXiv
+          ? { arXiv: rawId.slice("arxiv:".length) }
+          : { DOI: rawId.replace(/^https?:\/\/doi\.org\//i, "") };
+
+        const translate = new (
+          Zotero as unknown as {
+            Translate: {
+              Search: new () => {
+                setIdentifier(id: Record<string, string>): void;
+                getTranslators(): Promise<unknown[]>;
+                setTranslator(t: unknown): void;
+                translate(opts?: { libraryID?: number }): Promise<unknown[]>;
+              };
+            };
+          }
+        ).Translate.Search();
+
+        translate.setIdentifier(identifier);
+        const translators = await translate.getTranslators();
+        if (!translators || translators.length === 0) {
+          failed++;
+          continue;
+        }
+        translate.setTranslator(translators);
+        const items = await translate.translate({ libraryID: targetLibraryID });
+        if (items && items.length > 0) {
+          succeeded += items.length;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+    }
+
+    return { succeeded, failed };
+  }
 }

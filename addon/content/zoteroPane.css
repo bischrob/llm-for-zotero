@@ -1957,6 +1957,120 @@
   text-overflow: ellipsis;
 }
 
+/* ── Online Search Results (selectable paper cards from search_related_papers_online) ── */
+
+.llm-search-results {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.llm-search-results-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--stroke-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.llm-search-results-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--stroke-secondary);
+  cursor: default;
+}
+
+label.llm-search-results-item {
+  cursor: pointer;
+}
+
+.llm-search-results-item:last-child {
+  border-bottom: none;
+}
+
+label.llm-search-results-item:hover {
+  background: color-mix(in srgb, var(--material-background) 50%, var(--fill-quinary));
+}
+
+.llm-search-results-checkbox-wrap {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
+.llm-search-results-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.llm-search-results-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.llm-search-results-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--llm-fs-12);
+  font-weight: 600;
+  color: var(--fill-primary);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.llm-search-results-open {
+  flex: 0 0 auto;
+  font-size: var(--llm-fs-10);
+  color: var(--accent-blue);
+  text-decoration: none;
+  white-space: nowrap;
+  padding-top: 1px;
+  opacity: 0.85;
+}
+
+.llm-search-results-open:hover {
+  text-decoration: underline;
+  opacity: 1;
+}
+
+.llm-search-results-subtitle {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-secondary);
+  line-height: 1.3;
+}
+
+.llm-search-results-body {
+  font-size: var(--llm-fs-11);
+  color: var(--fill-tertiary);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.llm-search-results-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* Badge style shared with HITL card */
+.llm-agent-hitl-badge {
+  display: inline-block;
+  font-size: var(--llm-fs-10);
+  color: var(--fill-secondary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--material-background) 84%, var(--fill-quinary));
+  line-height: 1.6;
+}
+
 .llm-at-row {
   display: flex;
   align-items: flex-start;

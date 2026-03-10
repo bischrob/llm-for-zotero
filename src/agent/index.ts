@@ -50,6 +50,17 @@ export function getAgentRuntime(): AgentRuntime {
   return runtime;
 }
 
+/**
+ * Returns the shared ZoteroGateway instance for use outside the agent runtime
+ * (e.g. UI components that need to trigger Zotero operations directly).
+ */
+export function getSharedZoteroGateway(): ZoteroGateway {
+  if (!_zoteroGateway) {
+    throw new Error("Agent subsystem is not initialized");
+  }
+  return _zoteroGateway;
+}
+
 export function getAgentApi() {
   return {
     // ── Core turn API ──────────────────────────────────────────────────────

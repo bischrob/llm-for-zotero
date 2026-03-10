@@ -2171,15 +2171,273 @@ export async function editUserTurnAndRetry(
     getSelectedReasoningForItem(item.id, resolvedModel || "", resolvedApiBase);
   const resolvedAdvanced =
     advanced || getAdvancedModelParamsForEntry(profile?.entryId);
-  await retryLatestAssistantResponse(
+
+  // Route agent-mode retries through the agent runtime so tools are available
+  // and the old trace is properly cleared before the new run starts.
+  const isAgentRetry = history[assistantIndex]?.runMode === "agent";
+  if (isAgentRetry) {
+    await retryLatestAgentResponse(
+      body,
+      item,
+      resolvedModel,
+      resolvedApiBase,
+      resolvedApiKey,
+      resolvedReasoning,
+      resolvedAdvanced,
+    );
+  } else {
+    await retryLatestAssistantResponse(
+      body,
+      item,
+      resolvedModel,
+      resolvedApiBase,
+      resolvedApiKey,
+      resolvedReasoning,
+      resolvedAdvanced,
+    );
+  }
+}
+
+/**
+ * Re-runs the latest user→assistant pair in agent mode.
+ * Unlike `retryLatestAssistantResponse` (chat mode only), this function calls
+ * `runTurn` so the agent can use tools for the retry.
+ * It reuses the existing message objects rather than pushing new ones, so the
+ * conversation history stays clean.
+ */
+async function retryLatestAgentResponse(
+  body: Element,
+  item: Zotero.Item,
+  model?: string,
+  apiBase?: string,
+  apiKey?: string,
+  reasoning?: LLMReasoningConfig,
+  advanced?: AdvancedModelParams,
+): Promise<void> {
+  const ui = getPanelRequestUI(body);
+  await ensureConversationLoaded(item);
+  const conversationKey = getConversationKey(item);
+  const history = chatHistory.get(conversationKey) || [];
+  const retryPair = findLatestRetryPair(history);
+  if (!retryPair) {
+    if (ui.status) setStatus(ui.status, "No retryable response found", "error");
+    return;
+  }
+
+  const thisRequestId = nextRequestId();
+  setPendingRequestId(thisRequestId);
+  setRequestUIBusy(body, ui, conversationKey, "Preparing agent retry...");
+
+  const assistantMessage = retryPair.assistantMessage;
+
+  // Clear the previous agent run so the trace and text reset immediately.
+  assistantMessage.text = "";
+  assistantMessage.agentRunId = undefined;
+  assistantMessage.streaming = true;
+  assistantMessage.reasoningSummary = undefined;
+  assistantMessage.reasoningDetails = undefined;
+  assistantMessage.reasoningOpen = isReasoningExpandedByDefault();
+
+  const effectiveRequestConfig = resolveEffectiveRequestConfig({
+    item,
+    model,
+    apiBase,
+    apiKey,
+    reasoning,
+    advanced,
+  });
+  assistantMessage.modelName = effectiveRequestConfig.model;
+  assistantMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
+  assistantMessage.modelProviderLabel = effectiveRequestConfig.modelProviderLabel;
+
+  const { refreshChatSafely, setStatusSafely } = createPanelUpdateHelpers(
     body,
     item,
-    resolvedModel,
-    resolvedApiBase,
-    resolvedApiKey,
-    resolvedReasoning,
-    resolvedAdvanced,
+    conversationKey,
+    ui,
   );
+  refreshChatSafely(); // Immediately clear the old trace from view
+
+  const { question, screenshotImages, paperContexts, pinnedPaperContexts } =
+    reconstructRetryPayload(retryPair.userMessage);
+  if (!question.trim()) {
+    setStatusSafely("Nothing to retry for latest turn", "error");
+    restoreRequestUIIdle(body, conversationKey, thisRequestId);
+    setHistoryControlsDisabled(body, false);
+    return;
+  }
+
+  const selectedTextsRaw = Array.isArray(retryPair.userMessage.selectedTexts)
+    ? (retryPair.userMessage.selectedTexts.filter(Boolean) as string[])
+    : retryPair.userMessage.selectedText
+      ? [retryPair.userMessage.selectedText]
+      : [];
+
+  const historyForLLM = buildLLMHistoryMessages(
+    history.slice(0, retryPair.userIndex),
+  );
+
+  const runtimeRequest: AgentRuntimeRequest = {
+    conversationKey,
+    mode: "agent",
+    userText: question,
+    activeItemId: item.id,
+    selectedTexts: selectedTextsRaw,
+    selectedPaperContexts: paperContexts,
+    pinnedPaperContexts,
+    attachments: retryPair.userMessage.attachments?.filter(
+      (a) => a.category !== "image",
+    ),
+    screenshots: screenshotImages,
+    model: effectiveRequestConfig.model,
+    apiBase: effectiveRequestConfig.apiBase,
+    apiKey: effectiveRequestConfig.apiKey,
+    authMode: effectiveRequestConfig.authMode,
+    providerProtocol: effectiveRequestConfig.providerProtocol,
+    reasoning: effectiveRequestConfig.reasoning,
+    advanced: effectiveRequestConfig.advanced,
+    history: historyForLLM,
+    item,
+    systemPrompt: getStringPref("systemPrompt") || undefined,
+    modelProviderLabel: effectiveRequestConfig.modelProviderLabel,
+    libraryID: item.libraryID,
+  };
+
+  let assistantPersisted = false;
+  const persistAssistantOnce = async () => {
+    if (assistantPersisted) return;
+    assistantPersisted = true;
+    await updateStoredLatestAssistantMessage(conversationKey, {
+      text: assistantMessage.text,
+      timestamp: assistantMessage.timestamp,
+      runMode: "agent",
+      agentRunId: assistantMessage.agentRunId,
+      modelName: assistantMessage.modelName,
+      modelEntryId: assistantMessage.modelEntryId,
+      modelProviderLabel: assistantMessage.modelProviderLabel,
+    });
+  };
+  const markCancelled = async () => {
+    finalizeCancelledAssistantMessage(assistantMessage);
+    refreshChatSafely();
+    await persistAssistantOnce();
+    setStatusSafely("Cancelled", "ready");
+  };
+
+  const agentRuntime = getAgentRuntime();
+  try {
+    const AbortControllerCtor = getAbortController();
+    setCurrentAbortController(
+      AbortControllerCtor ? new AbortControllerCtor() : null,
+    );
+    const queueRefresh = createQueuedRefresh(refreshChatSafely);
+
+    const pushTraceEvent = (runId: string, event: AgentEvent) => {
+      const list = agentRunTraceCache.get(runId) || [];
+      list.push({
+        runId,
+        seq: list.length + 1,
+        eventType: event.type,
+        payload: event,
+        createdAt: Date.now(),
+      });
+      agentRunTraceCache.set(runId, list);
+    };
+
+    const outcome = await agentRuntime.runTurn({
+      request: runtimeRequest,
+      signal: currentAbortController?.signal,
+      onStart: async (runId) => {
+        assistantMessage.agentRunId = runId;
+        retryPair.userMessage.agentRunId = runId;
+        agentRunTraceCache.set(runId, []);
+        refreshChatSafely();
+        await updateStoredLatestUserMessage(conversationKey, {
+          text: retryPair.userMessage.text,
+          timestamp: retryPair.userMessage.timestamp,
+          runMode: "agent",
+          agentRunId: runId,
+          selectedText: retryPair.userMessage.selectedText,
+          selectedTexts: retryPair.userMessage.selectedTexts,
+          selectedTextSources: retryPair.userMessage.selectedTextSources,
+          selectedTextPaperContexts:
+            retryPair.userMessage.selectedTextPaperContexts,
+          screenshotImages: retryPair.userMessage.screenshotImages,
+          paperContexts: retryPair.userMessage.paperContexts,
+          attachments: retryPair.userMessage.attachments,
+        });
+      },
+      onEvent: async (event) => {
+        if (assistantMessage.agentRunId) {
+          pushTraceEvent(assistantMessage.agentRunId, event);
+        }
+        switch (event.type) {
+          case "status":
+            setStatusSafely(event.text, "sending");
+            break;
+          case "fallback":
+            setStatusSafely(event.reason, "sending");
+            break;
+          case "message_delta":
+            assistantMessage.text += sanitizeText(event.text);
+            break;
+          case "final":
+            if (!assistantMessage.text.trim()) {
+              assistantMessage.text = sanitizeText(event.text);
+            }
+            assistantMessage.streaming = false;
+            break;
+          default:
+            break;
+        }
+        if (event.type === "message_delta") {
+          queueRefresh();
+          return;
+        }
+        refreshChatSafely();
+        await waitForUiStep();
+      },
+    });
+
+    if (
+      cancelledRequestId >= thisRequestId ||
+      Boolean(currentAbortController?.signal.aborted)
+    ) {
+      await markCancelled();
+      return;
+    }
+
+    assistantMessage.agentRunId = outcome.runId;
+    assistantMessage.runMode = "agent";
+    const finalOutcomeText =
+      outcome.kind === "completed" ? outcome.text : assistantMessage.text;
+    assistantMessage.text =
+      sanitizeText(finalOutcomeText) || assistantMessage.text || "No response.";
+    assistantMessage.streaming = false;
+    refreshChatSafely();
+    await persistAssistantOnce();
+    setStatusSafely("Ready", "ready");
+  } catch (err) {
+    const isCancelled =
+      cancelledRequestId >= thisRequestId ||
+      Boolean(currentAbortController?.signal.aborted) ||
+      (err as { name?: string }).name === "AbortError";
+    if (isCancelled) {
+      await markCancelled();
+      return;
+    }
+    const errMsg = (err as Error).message || "Error";
+    assistantMessage.text = `Error: ${errMsg}`;
+    assistantMessage.streaming = false;
+    refreshChatSafely();
+    await persistAssistantOnce();
+    setStatusSafely(`Error: ${errMsg.slice(0, 40)}`, "error");
+  } finally {
+    setHistoryControlsDisabled(body, false);
+    restoreRequestUIIdle(body, conversationKey, thisRequestId);
+    setCurrentAbortController(null);
+    setPendingRequestId(0);
+  }
 }
 
 async function sendAgentQuestion(
@@ -3667,7 +3925,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           ztoolkit.log("LLM render error:", err);
           bubble.textContent = safeText;
         }
-        if (!msg.streaming) {
+        if (!msg.streaming && msg.runMode !== "agent") {
           try {
             const pairedUserMessage =
               history[index - 1]?.role === "user" ? history[index - 1] : null;

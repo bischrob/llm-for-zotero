@@ -374,6 +374,25 @@ export type AgentToolPresentationSummary =
   | string
   | ((input: AgentToolPresentationSummaryInput) => string | null);
 
+/**
+ * A single result card rendered below a tool's success row in the agent trace.
+ * Used by tools that return a list of structured items (e.g. online paper search).
+ */
+export type AgentToolResultCard = {
+  title: string;
+  subtitle?: string;
+  body?: string;
+  badges?: string[];
+  href?: string;
+  /**
+   * An identifier Zotero can use to import this paper into the library.
+   * - Bare DOI string (e.g. `"10.1073/pnas.2500077122"`)
+   * - arXiv ID prefixed with `"arxiv:"` (e.g. `"arxiv:2301.12345"`)
+   * When present, the card list renders with checkboxes and an "Add to Zotero" button.
+   */
+  importIdentifier?: string;
+};
+
 export type AgentToolPresentation = {
   label?: string;
   summaries?: {
@@ -389,6 +408,11 @@ export type AgentToolPresentation = {
     args: unknown;
     request?: AgentTraceRequestSummary;
   }) => AgentTraceChip[];
+  /**
+   * When provided, the agent trace renders a card list below the tool's
+   * success row.  Return `null` or an empty array to suppress cards.
+   */
+  buildResultCards?: (content: unknown) => AgentToolResultCard[] | null;
 };
 
 export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
