@@ -14,7 +14,7 @@
 Please see the latest [release notes](https://github.com/yilewang/llm-for-zotero/releases). The plugin name is now changed to `llm-for-zotero`.
 
 
-## Recent Update: 🤖 LLM-for-Zotero now becomes your own Agent in your Zotero app (BETA)! Please check the [Agent Mode](#agent-mode) section for more details.
+## Recent Update: 🤖 LLM-for-Zotero now becomes your own Agent in your Zotero app (BETA)! Please check the [Agent Mode](#agent-mode-beta) section for more details.
 
 LLM-for-Zotero now becomes your own Zotero Agent! It is currently in beta and is disabled by default. To enable it, please go to the settings and check the `Enable Agent Mode` checkbox.
 
