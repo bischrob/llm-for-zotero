@@ -3689,12 +3689,13 @@ label.llm-search-results-item:hover {
 
 .llm-image-preview-meta.llm-selected-context-meta.llm-selected-context-source-note-edit {
   white-space: nowrap;
+  font-weight: 600;
 }
 
 .llm-selected-context.llm-selected-context-source-note-edit .llm-selected-context-header {
-  border: 1px solid color-mix(in srgb, var(--color-accent) 38%, transparent);
+  border: 1px solid var(--llm-pin-border-color);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  background: var(--llm-pin-bg);
 }
 
 .llm-image-preview-meta.llm-selected-context-meta.llm-selected-context-meta-corrupted::after {
