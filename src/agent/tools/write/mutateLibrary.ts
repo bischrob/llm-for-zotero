@@ -929,6 +929,60 @@ function normalizeSelectedOperationIds(value: unknown): string[] | null {
   return ids.length ? ids : null;
 }
 
+function getOperationHint(type: string): string {
+  switch (type) {
+    case "apply_tags": return "Required: itemIds (number[]) and tags (string[]).";
+    case "remove_tags": return "Required: itemIds (number[]) and tags (string[]).";
+    case "update_metadata": return "Required: metadata (object with fields like title, DOI, etc).";
+    case "move_to_collection": return "Required: itemIds (number[]).";
+    case "remove_from_collection": return "Required: itemIds (number[]) and collectionId (number).";
+    case "create_collection": return "Required: name (string).";
+    case "delete_collection": return "Required: collectionId (number).";
+    case "save_note": return "Required: content (string).";
+    case "import_identifiers": return "Required: identifiers (string[] of DOIs or arXiv IDs).";
+    case "trash_items": return "Required: itemIds (number[]).";
+    default: return `Unknown type '${type}'. Valid types: apply_tags, remove_tags, update_metadata, move_to_collection, remove_from_collection, create_collection, delete_collection, save_note, import_identifiers, trash_items.`;
+  }
+}
+
+function diagnoseOperationFailure(rawArgs: Record<string, unknown>): string {
+  const rawOps = normalizeOperationListValue(rawArgs);
+  if (!Array.isArray(rawOps)) {
+    return `operations must be an array, got ${typeof rawOps}. ` +
+      `Expected: { operations: [{ type: "apply_tags", itemIds: [...], tags: [...] }] }`;
+  }
+  if (rawOps.length === 0) {
+    return `operations array is empty. Each operation needs a 'type' field. ` +
+      `Valid types: update_metadata, apply_tags, remove_tags, move_to_collection, ` +
+      `remove_from_collection, create_collection, delete_collection, save_note, ` +
+      `import_identifiers, trash_items.`;
+  }
+  const diagnostics: string[] = [];
+  for (let i = 0; i < rawOps.length; i++) {
+    const entry = rawOps[i];
+    if (!entry || typeof entry !== "object") {
+      diagnostics.push(`operations[${i}]: expected an object, got ${typeof entry}`);
+      continue;
+    }
+    const obj = entry as Record<string, unknown>;
+    if (!obj.type || typeof obj.type !== "string") {
+      diagnostics.push(
+        `operations[${i}]: missing 'type' field. Valid types: apply_tags, update_metadata, move_to_collection, save_note, trash_items, ...`
+      );
+      continue;
+    }
+    const normalized = normalizeOperation(obj, i);
+    if (!normalized) {
+      diagnostics.push(
+        `operations[${i}] (type='${obj.type}'): invalid or missing required fields. ${getOperationHint(String(obj.type))}`
+      );
+    }
+  }
+  return diagnostics.length
+    ? diagnostics.join("; ")
+    : "No recognizable operations found. Valid types: apply_tags, remove_tags, update_metadata, move_to_collection, remove_from_collection, create_collection, delete_collection, save_note, import_identifiers, trash_items.";
+}
+
 export function createMutateLibraryTool(
   zoteroGateway: ZoteroGateway,
 ): AgentToolDefinition<MutateLibraryInput, unknown> {
@@ -936,6 +990,7 @@ export function createMutateLibraryTool(
   return {
     spec: {
       name: "mutate_library",
+      internalOnly: true,
       description:
         "Apply one or more Zotero write operations in a single batch. Supports metadata updates, tags, collection moves, note saving, collection creation/deletion, identifier import, and trashing items behind one confirmation step.",
       inputSchema: {
@@ -992,11 +1047,11 @@ export function createMutateLibraryTool(
     },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {
-        return fail("Expected an object");
+        return fail("Expected an object with an 'operations' array");
       }
       const operations = normalizeOperations(normalizeOperationListValue(args));
       if (!operations?.length) {
-        return fail("operations must include at least one valid operation");
+        return fail(diagnoseOperationFailure(args));
       }
       return ok<MutateLibraryInput>({ operations });
     },

@@ -79,6 +79,29 @@ export function normalizeToolPaperContext(
   };
 }
 
+/**
+ * Reusable JSON Schema fragment for PaperContextRef objects.
+ * Use this in tool inputSchemas instead of opaque `additionalProperties: true`.
+ */
+export const PAPER_CONTEXT_REF_SCHEMA = {
+  type: "object" as const,
+  description:
+    "Paper reference from Zotero context. Use itemId and contextItemId from the context summary.",
+  required: ["itemId", "contextItemId"] as const,
+  properties: {
+    itemId: {
+      type: "number" as const,
+      description: "Zotero parent item ID",
+    },
+    contextItemId: {
+      type: "number" as const,
+      description: "Zotero attachment/context item ID",
+    },
+    title: { type: "string" as const },
+  },
+  additionalProperties: false,
+};
+
 export function findAttachment(
   attachments: ChatAttachment[] | undefined,
   args: { attachmentId?: string; name?: string },

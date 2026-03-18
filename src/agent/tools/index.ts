@@ -12,6 +12,12 @@ import { createSearchLiteratureOnlineTool } from "./read/searchLiteratureOnline"
 import { createMutateLibraryTool } from "./write/mutateLibrary";
 import { createEditCurrentNoteTool } from "./write/editCurrentNote";
 import { createUndoLastActionTool } from "./write/undoLastAction";
+import { createApplyTagsTool } from "./write/applyTags";
+import { createMoveToCollectionTool } from "./write/moveToCollection";
+import { createUpdateMetadataTool } from "./write/updateMetadata";
+import { createManageCollectionsTool } from "./write/manageCollections";
+import { createImportIdentifiersTool } from "./write/importIdentifiers";
+import { createTrashItemsTool } from "./write/trashItems";
 import { PdfPageService } from "../services/pdfPageService";
 
 type BuiltInAgentToolDeps = {
@@ -37,6 +43,12 @@ export function createBuiltInToolRegistry(
   );
   registry.register(createSearchLiteratureOnlineTool(deps.zoteroGateway));
   registry.register(createMutateLibraryTool(deps.zoteroGateway));
+  registry.register(createApplyTagsTool(deps.zoteroGateway));
+  registry.register(createMoveToCollectionTool(deps.zoteroGateway));
+  registry.register(createUpdateMetadataTool(deps.zoteroGateway));
+  registry.register(createManageCollectionsTool(deps.zoteroGateway));
+  registry.register(createImportIdentifiersTool(deps.zoteroGateway));
+  registry.register(createTrashItemsTool(deps.zoteroGateway));
   registry.register(createEditCurrentNoteTool(deps.zoteroGateway));
   registry.register(createUndoLastActionTool());
   return registry;

@@ -721,7 +721,7 @@ export class AgentRuntime {
         if (outcome.stopRun) {
           return completeRun(outcome.finalText || currentAnswerText, "completed");
         }
-        if (consecutiveToolErrors >= 2) {
+        if (consecutiveToolErrors >= 3) {
           const finalText =
             currentAnswerText ||
             "Agent stopped after repeated tool errors. Please adjust the request and try again.";

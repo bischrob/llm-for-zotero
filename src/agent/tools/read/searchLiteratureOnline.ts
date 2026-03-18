@@ -11,6 +11,7 @@ import {
   normalizePositiveInt,
   normalizeToolPaperContext,
   ok,
+  PAPER_CONTEXT_REF_SCHEMA,
   validateObject,
 } from "../shared";
 
@@ -63,10 +64,7 @@ export function createSearchLiteratureOnlineTool(
             enum: ["openalex", "arxiv", "europepmc"],
           },
           itemId: { type: "number" },
-          paperContext: {
-            type: "object",
-            additionalProperties: true,
-          },
+          paperContext: PAPER_CONTEXT_REF_SCHEMA,
           doi: { type: "string" },
           title: { type: "string" },
           arxivId: { type: "string" },

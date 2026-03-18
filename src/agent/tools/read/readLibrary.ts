@@ -11,6 +11,7 @@ import {
   normalizePositiveIntArray,
   normalizeToolPaperContext,
   ok,
+  PAPER_CONTEXT_REF_SCHEMA,
   validateObject,
 } from "../shared";
 
@@ -77,10 +78,8 @@ export function createReadLibraryTool(
           },
           paperContexts: {
             type: "array",
-            items: {
-              type: "object",
-              additionalProperties: true,
-            },
+            description: "Paper context references. Alternative to itemIds for targeting papers.",
+            items: PAPER_CONTEXT_REF_SCHEMA,
           },
           sections: {
             type: "array",
@@ -129,7 +128,17 @@ export function createReadLibraryTool(
       }
       const sections = normalizeSections(args.sections);
       if (!sections?.length) {
-        return fail("sections must include at least one valid section");
+        const rawSections = Array.isArray(args.sections) ? args.sections : [];
+        if (!rawSections.length) {
+          return fail(
+            "sections is required: provide an array like ['metadata', 'notes']. " +
+            "Valid sections: metadata, notes, content, annotations, attachments, collections."
+          );
+        }
+        return fail(
+          `None of the provided sections are valid: ${JSON.stringify(rawSections.slice(0, 5))}. ` +
+          `Valid sections: metadata, notes, content, annotations, attachments, collections.`
+        );
       }
       return ok<ReadLibraryInput>({
         itemIds: normalizePositiveIntArray(args.itemIds) || undefined,

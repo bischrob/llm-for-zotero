@@ -874,7 +874,7 @@ describe("primitive agent tools", function () {
     assert.include(systemText, "query_library");
     assert.include(systemText, "read_library");
     assert.include(systemText, "inspect_pdf");
-    assert.include(systemText, "mutate_library");
+    assert.include(systemText, "apply_tags");
     assert.include(
       systemText,
       "the search_literature_online review card is the deliverable",
@@ -883,12 +883,12 @@ describe("primitive agent tools", function () {
     assert.notInclude(systemText, "read_paper_front_matter");
   });
 
-  it("adds direct-card guidance for unfiled filing requests", async function () {
+  it("adds direct-card guidance for write tool requests", async function () {
     const messages = await buildAgentInitialMessages(
       {
         conversationKey: 2,
         mode: "agent",
-        userText: "can you help me move the unfiled items to folders?",
+        userText: "can you help me tag these papers?",
       },
       [
         createQueryLibraryTool({} as never),
@@ -897,18 +897,10 @@ describe("primitive agent tools", function () {
     );
     const systemText =
       typeof messages[0]?.content === "string" ? messages[0].content : "";
-    assert.include(
-      systemText,
-      "the mutate_library confirmation card is the deliverable",
-    );
-    assert.include(
-      systemText,
-      "mutate_library with operations:[{type:'move_to_collection', itemIds:[...]}]",
-    );
-    assert.include(
-      systemText,
-      "let the confirmation card collect the target folders",
-    );
+    // The persona instructions now reference the new tool names
+    assert.include(systemText, "apply_tags");
+    assert.include(systemText, "move_to_collection");
+    assert.include(systemText, "confirmation card is the deliverable");
   });
 
   it("edit_current_note confirms, updates the active note, and records undo", async function () {
@@ -952,8 +944,9 @@ describe("primitive agent tools", function () {
       },
     };
 
-    assert.isFalse(Boolean(tool.isAvailable?.(baseContext.request)));
-    assert.isTrue(Boolean(tool.isAvailable?.(noteRequest)));
+    // edit_current_note is always available (supports both edit and create modes)
+    assert.isTrue(tool.isAvailable?.(baseContext.request) !== false);
+    assert.isTrue(tool.isAvailable?.(noteRequest) !== false);
 
     const validated = tool.validate({
       content: "Rewritten body",

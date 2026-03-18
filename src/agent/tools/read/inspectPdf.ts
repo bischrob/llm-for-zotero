@@ -18,6 +18,7 @@ import {
   normalizePositiveIntArray,
   normalizeToolPaperContext,
   ok,
+  PAPER_CONTEXT_REF_SCHEMA,
   validateObject,
 } from "../shared";
 
@@ -304,13 +305,45 @@ export function createInspectPdfTool(
           },
           target: {
             type: "object",
-            additionalProperties: true,
+            description: "Target paper or attachment.",
+            properties: {
+              contextItemId: {
+                type: "number",
+                description: "Zotero attachment item ID (from paper context or query results)",
+              },
+              itemId: {
+                type: "number",
+                description: "Zotero parent item ID",
+              },
+              paperContext: PAPER_CONTEXT_REF_SCHEMA,
+              attachmentId: {
+                type: "string",
+                description: "Uploaded attachment ID (for file attachments)",
+              },
+              name: {
+                type: "string",
+                description: "Uploaded attachment name",
+              },
+            },
+            additionalProperties: false,
           },
           targets: {
             type: "array",
+            description: "Multiple target papers (max 6). Same shape as target.",
             items: {
               type: "object",
-              additionalProperties: true,
+              properties: {
+                contextItemId: {
+                  type: "number",
+                  description: "Zotero attachment item ID",
+                },
+                itemId: {
+                  type: "number",
+                  description: "Zotero parent item ID",
+                },
+                paperContext: PAPER_CONTEXT_REF_SCHEMA,
+              },
+              additionalProperties: false,
             },
           },
           question: { type: "string" },
@@ -448,7 +481,11 @@ export function createInspectPdfTool(
           ? (args.operation as InspectPdfOperation)
           : null;
       if (!operation) {
-        return fail("operation is required");
+        return fail(
+          `Invalid operation '${String(args.operation)}'. Valid operations: ` +
+          `front_matter, retrieve_evidence, read_chunks, search_pages, render_pages, ` +
+          `capture_active_view, attach_file, read_attachment, index_attachment.`
+        );
       }
       const pagesSelection = normalizePages(args.pages);
       const input: InspectPdfInput = {

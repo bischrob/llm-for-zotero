@@ -73,7 +73,8 @@ export class AgentToolRegistry {
     request: AgentRuntimeRequest,
   ): AgentToolDefinition<any, any>[] {
     return Array.from(this.tools.values()).filter(
-      (tool) => tool.isAvailable?.(request) !== false,
+      (tool) =>
+        !tool.spec.internalOnly && tool.isAvailable?.(request) !== false,
     );
   }
 
