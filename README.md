@@ -13,6 +13,10 @@
 
 **llm-for-zotero** is a plugin for [Zotero](https://www.zotero.org/) that integrates Large Language Models directly into the Zotero PDF reader. Unlike tools that require uploading PDFs to a web portal, this plugin lets you chat with your papers without leaving Zotero. It sits quietly in the reader sidebar — your standby research assistant, ready whenever you need it.
 
+Documentation: 
+- [English](https://yilewang.github.io/llm-for-zotero)
+- [Chinese](https://yilewang.github.io/llm-for-zotero/zh/)
+
 <p align="center">
   <img src="./assets/demo.png" alt="Screenshot of the llm-for-zotero sidebar inside the Zotero PDF reader" width="1024" />
 </p>
