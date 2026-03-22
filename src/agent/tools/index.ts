@@ -23,6 +23,7 @@ import { createManageAttachmentsTool } from "./write/manageAttachments";
 import { createRunCommandTool } from "./write/runCommand";
 import { createImportLocalFilesTool } from "./write/importLocalFiles";
 import { createFileIOTool } from "./write/fileIO";
+import { createZoteroScriptTool } from "./write/zoteroScript";
 import { PdfPageService } from "../services/pdfPageService";
 
 type BuiltInAgentToolDeps = {
@@ -59,6 +60,7 @@ export function createBuiltInToolRegistry(
   registry.register(createRunCommandTool());
   registry.register(createImportLocalFilesTool(deps.zoteroGateway));
   registry.register(createFileIOTool());
+  registry.register(createZoteroScriptTool());
   registry.register(createUndoLastActionTool());
   return registry;
 }

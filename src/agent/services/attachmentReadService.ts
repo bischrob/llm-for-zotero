@@ -8,6 +8,7 @@ export type AttachmentReadResult = {
   title: string;
   contentType: string;
   category: AttachmentContentCategory;
+  filePath?: string;
   textContent?: string;
   imageDataUrl?: string;
   wordCount?: number;
@@ -123,13 +124,17 @@ export class AttachmentReadService {
       };
     }
 
+    // Include filePath in all results from here on so the agent can use
+    // run_command as a fallback for unsupported content types.
+    const baseWithPath = { ...baseResult, filePath };
+
     try {
       const bytes = await readAttachmentBytes(filePath);
 
       if (category === "image") {
         const base64 = encodeBase64(bytes);
         return {
-          ...baseResult,
+          ...baseWithPath,
           imageDataUrl: `data:${info.contentType};base64,${base64}`,
         };
       }
@@ -147,13 +152,13 @@ export class AttachmentReadService {
           : 50000;
       const truncated = text.length > maxChars ? `${text.slice(0, maxChars)}\u2026` : text;
       return {
-        ...baseResult,
+        ...baseWithPath,
         textContent: truncated,
         wordCount: truncated.split(/\s+/).filter(Boolean).length,
       };
     } catch (error) {
       return {
-        ...baseResult,
+        ...baseWithPath,
         category: "binary",
         note: `Could not read file content: ${error instanceof Error ? error.message : String(error)}`,
       };
