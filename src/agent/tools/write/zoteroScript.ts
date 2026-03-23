@@ -361,15 +361,14 @@ export function createZoteroScriptTool(): AgentToolDefinition<ZoteroScriptInput,
           const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
           const mode = String(a.mode || "script");
           const desc = typeof a.description === "string" ? a.description : "Zotero operation";
-          const preview = desc.length > 60 ? desc.slice(0, 60) + "…" : desc;
-          return `${mode === "read" ? "Reading" : "Preparing"}: ${preview}`;
+          return `${mode === "read" ? "Reading" : "Preparing"}: ${desc}`;
         },
         onPending: "Waiting for confirmation to run Zotero script",
         onApproved: "Executing Zotero script",
         onDenied: "Script cancelled",
         onSuccess: ({ content }) => {
           const r = content && typeof content === "object" ? (content as Record<string, unknown>) : {};
-          if (r.error) return `Script error: ${String(r.error).slice(0, 80)}`;
+          if (r.error) return `Script error: ${String(r.error)}`;
           const count = typeof r.itemsAffected === "number" ? r.itemsAffected : undefined;
           return count !== undefined
             ? `Script completed — ${count} item${count === 1 ? "" : "s"} affected`

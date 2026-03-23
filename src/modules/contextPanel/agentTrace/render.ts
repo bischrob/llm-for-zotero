@@ -1965,10 +1965,7 @@ function summarizeAgentTraceToolResult(
         getToolDefinition(name)?.presentation?.summaries?.onError,
         { label, content, request },
       ) ||
-      truncateAgentTraceText(
-        `Could not complete ${label}: ${rawError || "Tool failed"}`,
-        92,
-      );
+      `Could not complete ${label}: ${rawError || "Tool failed"}`;
     return {
       kind: "skip",
       icon: "!",
