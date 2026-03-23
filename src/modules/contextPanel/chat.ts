@@ -3817,6 +3817,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
                 ? Math.floor(pairedUserMessage.timestamp)
                 : 0,
             assistantTimestamp: Math.floor(msg.timestamp),
+            paperContexts: pairedUserMessage?.paperContexts,
           });
           positionMenuAtPointer(body, responseMenu, me.clientX, me.clientY);
         });

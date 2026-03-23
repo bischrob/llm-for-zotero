@@ -24,7 +24,12 @@ import {
   collectAndDeleteUnreferencedBlobs,
   replaceOwnerAttachmentRefs,
 } from "../../utils/attachmentRefStore";
-import type { ChatAttachment, Message, SelectedTextSource } from "./types";
+import type { ChatAttachment, Message, PaperContextRef, SelectedTextSource } from "./types";
+import {
+  extractStandalonePaperSourceLabel,
+  extractInlineCitationMentions,
+  matchAssistantCitationCandidates,
+} from "./assistantCitationLinks";
 import {
   isGlobalPortalItem,
   isPaperPortalItem,
@@ -190,14 +195,161 @@ function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
   return item;
 }
 
+// ---------------------------------------------------------------------------
+// Citation link injection for Zotero notes
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a `zotero://open-pdf/…` URI that opens a PDF attachment at a given
+ * page.  Returns `null` when the item cannot be resolved.
+ */
+function buildZoteroPdfUri(
+  contextItemId: number,
+  pageLabel?: string,
+): string | null {
+  try {
+    const item = Zotero.Items.get(contextItemId);
+    if (!item) return null;
+    const key = (item as any).key as string | undefined;
+    if (!key) return null;
+    const libraryID = Number(item.libraryID);
+    // Determine library path segment
+    let libraryPath = "library";
+    if (libraryID && libraryID !== Zotero.Libraries.userLibraryID) {
+      const lib = Zotero.Libraries.get(libraryID) as any;
+      const groupID = lib?.groupID;
+      if (groupID) {
+        libraryPath = `groups/${groupID}`;
+      }
+    }
+    let uri = `zotero://open-pdf/${libraryPath}/items/${key}`;
+    // pageLabel is a display label (e.g. "5", "iv").  The `page` param in the
+    // zotero:// URI expects a 1-based physical page number.  If it looks like
+    // a simple integer, append it; otherwise omit to open at the start.
+    if (pageLabel) {
+      const pageNum = parseInt(pageLabel, 10);
+      if (Number.isFinite(pageNum) && pageNum > 0) {
+        uri += `?page=${pageNum}`;
+      }
+    }
+    return uri;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Post-process rendered note HTML to wrap citation mentions with clickable
+ * `zotero://open-pdf` hyperlinks so users can jump to the cited PDF page
+ * directly from the saved Zotero note.
+ *
+ * Handles both blockquote-tail citations (`<blockquote>…</blockquote><p>(Author, 2024)</p>`)
+ * and inline parenthetical/narrative citations within paragraph text.
+ */
+function injectCitationLinksIntoNoteHtml(
+  html: string,
+  paperContexts: PaperContextRef[] | undefined,
+): string {
+  if (!html || !paperContexts?.length) return html;
+
+  // --- Phase 1: blockquote-tail citations ---
+  // Pattern: `</blockquote>…<p>(Author et al., 2024[, page N])</p>`
+  // We look for <p> tags whose text content looks like a standalone citation.
+  let result = html.replace(
+    /(<\/blockquote>\s*<p>)([\s\S]*?)(<\/p>)/gi,
+    (_match, prefix: string, innerText: string, suffix: string) => {
+      const plainText = innerText.replace(/<[^>]+>/g, "").trim();
+      if (!plainText) return _match;
+      const candidates = matchAssistantCitationCandidates(plainText, paperContexts);
+      if (!candidates.length) return _match;
+      const bestCandidate = candidates[0];
+      const extracted = extractStandalonePaperSourceLabel(plainText);
+      const uri = buildZoteroPdfUri(
+        bestCandidate.contextItemId,
+        extracted?.pageLabel,
+      );
+      if (!uri) return _match;
+      return `${prefix}<a href="${escapeNoteHtml(uri)}">${innerText}</a>${suffix}`;
+    },
+  );
+
+  // --- Phase 2: inline citations ---
+  // Process each <p>…</p> block (but skip those already handled as blockquote tails).
+  result = result.replace(
+    /(<p>)([\s\S]*?)(<\/p>)/gi,
+    (_match, prefix: string, innerHtml: string, suffix: string) => {
+      // Skip if this <p> is entirely wrapped in an <a> already (from phase 1).
+      if (/^<a\s/.test(innerHtml.trim())) return _match;
+      // Extract text content for citation pattern matching.
+      const plainText = innerHtml.replace(/<[^>]+>/g, "");
+      if (!plainText.trim()) return _match;
+      const mentions = extractInlineCitationMentions(plainText);
+      if (!mentions.length) return _match;
+
+      // Build a mapping from plainText offsets back to innerHtml offsets.
+      // We need this because innerHtml may contain HTML tags that shift offsets.
+      const plainToHtmlMap: number[] = [];
+      let plainIdx = 0;
+      let inTag = false;
+      for (let htmlIdx = 0; htmlIdx < innerHtml.length; htmlIdx++) {
+        if (innerHtml[htmlIdx] === "<") {
+          inTag = true;
+          continue;
+        }
+        if (inTag) {
+          if (innerHtml[htmlIdx] === ">") inTag = false;
+          continue;
+        }
+        plainToHtmlMap[plainIdx] = htmlIdx;
+        plainIdx++;
+      }
+      // sentinel for end-of-string
+      plainToHtmlMap[plainIdx] = innerHtml.length;
+
+      // Process mentions in reverse order to keep offsets valid.
+      let modifiedHtml = innerHtml;
+      for (let i = mentions.length - 1; i >= 0; i--) {
+        const mention = mentions[i];
+        const candidates = matchAssistantCitationCandidates(
+          mention.rawText,
+          paperContexts,
+        );
+        if (!candidates.length) continue;
+        const bestCandidate = candidates[0];
+        const uri = buildZoteroPdfUri(
+          bestCandidate.contextItemId,
+          mention.extractedCitation.pageLabel,
+        );
+        if (!uri) continue;
+
+        // Map plain-text offsets to HTML offsets.
+        const htmlStart = plainToHtmlMap[mention.start];
+        const htmlEnd = plainToHtmlMap[mention.end];
+        if (htmlStart === undefined || htmlEnd === undefined) continue;
+
+        const citationHtml = modifiedHtml.slice(htmlStart, htmlEnd);
+        const linked = `<a href="${escapeNoteHtml(uri)}">${citationHtml}</a>`;
+        modifiedHtml =
+          modifiedHtml.slice(0, htmlStart) + linked + modifiedHtml.slice(htmlEnd);
+      }
+
+      return `${prefix}${modifiedHtml}${suffix}`;
+    },
+  );
+
+  return result;
+}
+
 function buildAssistantNoteHtml(
   contentText: string,
   modelName: string,
+  paperContexts?: PaperContextRef[],
 ): string {
   const response = sanitizeText(contentText || "").trim();
   const source = modelName.trim() || "unknown";
   const timestamp = getCurrentLocalTimestamp();
-  const responseHtml = renderRawNoteHtml(response);
+  let responseHtml = renderRawNoteHtml(response);
+  responseHtml = injectCitationLinksIntoNoteHtml(responseHtml, paperContexts);
   return `<p><strong>${escapeNoteHtml(timestamp)}</strong></p><p><strong>${escapeNoteHtml(source)}:</strong></p><div>${responseHtml}</div><hr/><p>Written by LLM-for-Zotero plugin</p>`;
 }
 
@@ -424,6 +576,7 @@ export function buildChatHistoryNotePayload(messages: Message[]): {
   const timestamp = getCurrentLocalTimestamp();
   const textLines: string[] = [];
   const htmlBlocks: string[] = [];
+  let lastUserPaperContexts: PaperContextRef[] | undefined;
   for (const msg of messages) {
     const text = sanitizeText(msg.text || "").trim();
     const selectedTextContexts = normalizeSelectedTextsForNote(
@@ -493,9 +646,17 @@ export function buildChatHistoryNotePayload(messages: Message[]): {
         : "";
     const fileHtml =
       msg.role === "user" ? buildFileListHtmlForNote(fileAttachments) : "";
-    const rendered = renderChatMessageHtmlForNote(
+    let rendered = renderChatMessageHtmlForNote(
       msg.role === "user" ? htmlTextWithContext : textWithContext,
     );
+    // For assistant messages, inject citation links using the preceding
+    // user message's paper contexts so citations become clickable in the note.
+    if (msg.role === "assistant" && rendered) {
+      rendered = injectCitationLinksIntoNoteHtml(rendered, lastUserPaperContexts);
+    }
+    if (msg.role === "user") {
+      lastUserPaperContexts = msg.paperContexts;
+    }
     if (!rendered && !screenshotHtml && !fileHtml) continue;
     textLines.push(`${speaker}: ${textWithContext}`);
     const renderedBlock = rendered ? `<div>${rendered}</div>` : "";
@@ -526,6 +687,7 @@ export async function createNoteFromAssistantText(
   item: Zotero.Item,
   contentText: string,
   modelName: string,
+  paperContexts?: PaperContextRef[],
 ): Promise<"created" | "appended"> {
   const parentItem = resolveParentItemForNote(item);
   const parentId = parentItem?.id;
@@ -539,7 +701,7 @@ export async function createNoteFromAssistantText(
   // of injecting rendered DOM HTML from the bubble was fragile — KaTeX
   // span trees and sanitised classless wrappers were mostly dropped by
   // ProseMirror.)
-  const html = buildAssistantNoteHtml(contentText, modelName);
+  const html = buildAssistantNoteHtml(contentText, modelName, paperContexts);
 
   // Try to find an existing tracked note for this parent item.
   // If one exists and is still valid, append the new content to it.
@@ -592,6 +754,7 @@ export async function createStandaloneNoteFromAssistantText(
   libraryID: number,
   contentText: string,
   modelName: string,
+  paperContexts?: PaperContextRef[],
 ): Promise<"created"> {
   const normalizedLibraryID = Number.isFinite(libraryID)
     ? Math.floor(libraryID)
@@ -599,7 +762,7 @@ export async function createStandaloneNoteFromAssistantText(
   if (normalizedLibraryID <= 0) {
     throw new Error("Invalid library ID for standalone note creation");
   }
-  const html = buildAssistantNoteHtml(contentText, modelName);
+  const html = buildAssistantNoteHtml(contentText, modelName, paperContexts);
   const note = new Zotero.Item("note");
   note.libraryID = normalizedLibraryID;
   note.setNote(html);

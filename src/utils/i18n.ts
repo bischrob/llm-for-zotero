@@ -241,6 +241,7 @@ const zhCN: Record<string, string> = {
   "API URL": "API URL",
   "API Key": "API 密钥",
   "codex auth": "codex 认证",
+  "Codex Auth": "Codex 认证",
   "Auth Mode": "认证模式",
   "Model names": "模型名称",
   "Add model": "添加模型",

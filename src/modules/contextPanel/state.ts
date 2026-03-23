@@ -73,6 +73,7 @@ export let responseMenuTarget: {
   conversationKey?: number;
   userTimestamp?: number;
   assistantTimestamp?: number;
+  paperContexts?: PaperContextRef[];
 } | null = null;
 export function setResponseMenuTarget(value: typeof responseMenuTarget) {
   responseMenuTarget = value;

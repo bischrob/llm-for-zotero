@@ -623,7 +623,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       apiKeyOption.textContent = t("API Key");
       const codexOption = el(doc, "option") as HTMLOptionElement;
       codexOption.value = "codex_auth";
-      codexOption.textContent = t("codex auth");
+      codexOption.textContent = t("Codex Auth");
       const copilotOption = el(doc, "option") as HTMLOptionElement;
       copilotOption.value = "copilot_auth";
       copilotOption.textContent = t("GitHub Copilot");

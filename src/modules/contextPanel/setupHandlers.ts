@@ -1190,7 +1190,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           ztoolkit.log("LLM: Note save – no responseMenuTarget");
           return;
         }
-        const { item: targetItem, contentText, modelName } = target;
+        const { item: targetItem, contentText, modelName, paperContexts } = target;
         if (!targetItem || !contentText) {
           ztoolkit.log("LLM: Note save – missing item or contentText");
           return;
@@ -1209,6 +1209,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
               libraryID,
               contentText,
               modelName,
+              paperContexts,
             );
             if (status) {
               setStatus(status, t("Created a new note"), "ready");
@@ -1219,6 +1220,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             targetItem,
             contentText,
             modelName,
+            paperContexts,
           );
           if (status) {
             setStatus(
