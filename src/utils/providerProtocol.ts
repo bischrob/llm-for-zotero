@@ -105,7 +105,7 @@ export function inferLegacyProviderProtocol(params: {
     return "codex_responses";
   }
   if (params.authMode === "copilot_auth") {
-    return "responses_api";
+    return "openai_chat_compat";
   }
   return isResponsesBase(params.apiBase || "")
     ? "responses_api"
@@ -136,7 +136,7 @@ export function normalizeProviderProtocolForAuthMode(params: {
     // Copilot supports both responses_api and openai_chat_compat
     return normalized === "openai_chat_compat" || normalized === "responses_api"
       ? normalized
-      : "responses_api";
+      : "openai_chat_compat";
   }
   if (normalized === "codex_responses") {
     return fallback === "codex_responses" ? inferred : fallback;

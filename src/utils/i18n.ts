@@ -275,8 +275,7 @@ const zhCN: Record<string, string> = {
   "Fetch available models": "获取可用模型",
   "Fetching models…": "正在获取模型…",
   "No models found": "未找到模型",
-  "Added %n models": "已添加 %n 个模型",
-  "All models already added": "所有模型已添加",
+  "Synced %n models": "已同步 %n 个模型",
 
   // ── Language setting ────────────────────────────────────────────────────
   "Language": "语言",

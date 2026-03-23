@@ -6,12 +6,12 @@ import {
   normalizeTemperature,
 } from "./normalization";
 import {
+  isProviderProtocol,
   normalizeProviderProtocolForAuthMode,
   type ProviderProtocol,
 } from "./providerProtocol";
 import { detectProviderPreset, getProviderPreset } from "./providerPresets";
 import type { ProviderPresetId } from "./providerPresets";
-import { resolveCopilotProtocolForModel } from "./copilotModelCache";
 
 export type LegacyModelSlotKey =
   | "primary"
@@ -28,6 +28,8 @@ export type AdvancedModelConfig = {
 export type ModelProviderModel = AdvancedModelConfig & {
   id: string;
   model: string;
+  /** Per-model protocol override. When set, overrides the group-level protocol. */
+  providerProtocol?: ProviderProtocol;
 };
 
 export type ModelProviderAuthMode = "api_key" | "codex_auth" | "copilot_auth";
@@ -266,6 +268,7 @@ function normalizeGroupModel(model: unknown): ModelProviderModel | null {
     temperature?: unknown;
     maxTokens?: unknown;
     inputTokenCap?: unknown;
+    providerProtocol?: unknown;
   };
   const modelName = normalizeString(rawModel.model);
   const advanced = normalizeAdvancedModelConfig({
@@ -273,6 +276,9 @@ function normalizeGroupModel(model: unknown): ModelProviderModel | null {
     maxTokens: Number(rawModel.maxTokens),
     inputTokenCap: rawModel.inputTokenCap as number | string | undefined,
   });
+  const modelProtocol = isProviderProtocol(rawModel.providerProtocol)
+    ? rawModel.providerProtocol
+    : undefined;
   return {
     id:
       typeof rawModel.id === "string" && rawModel.id.trim()
@@ -280,6 +286,7 @@ function normalizeGroupModel(model: unknown): ModelProviderModel | null {
         : createId("model"),
     model: modelName,
     ...advanced,
+    ...(modelProtocol ? { providerProtocol: modelProtocol } : {}),
   };
 }
 
@@ -482,11 +489,13 @@ export function createEmptyProviderGroup(): ModelProviderGroup {
 export function createProviderModelEntry(
   model = "",
   advanced?: Partial<AdvancedModelConfig>,
+  providerProtocol?: ProviderProtocol,
 ): ModelProviderModel {
   return {
     id: createId("model"),
     model: model.trim(),
     ...normalizeAdvancedModelConfig(advanced),
+    ...(providerProtocol ? { providerProtocol } : {}),
   };
 }
 
@@ -526,21 +535,11 @@ export function getRuntimeModelEntries(): RuntimeModelEntry[] {
         apiBase: normalizeApiBase(group.apiBase),
         apiKey: group.apiKey.trim(),
         authMode,
-        providerProtocol:
-          authMode === "copilot_auth"
-            ? resolveCopilotProtocolForModel(
-                modelName,
-                normalizeProviderProtocolForAuthMode({
-                  protocol: group.providerProtocol,
-                  authMode,
-                  apiBase: group.apiBase,
-                }) as "responses_api" | "openai_chat_compat",
-              )
-            : normalizeProviderProtocolForAuthMode({
-                protocol: group.providerProtocol,
-                authMode,
-                apiBase: group.apiBase,
-              }),
+        providerProtocol: normalizeProviderProtocolForAuthMode({
+          protocol: modelEntry.providerProtocol || group.providerProtocol,
+          authMode,
+          apiBase: group.apiBase,
+        }),
         providerLabel,
         providerOrder: groupIndex,
         displayModelLabel:

@@ -48,7 +48,6 @@ import {
   type ModelProviderAuthMode,
 } from "./modelProviders";
 import { isGrokApiBase } from "./providerPresets";
-import { setCopilotModelEndpoints } from "./copilotModelCache";
 import type { ProviderProtocol } from "./providerProtocol";
 import {
   buildProviderTransportHeaders,
@@ -831,30 +830,12 @@ export async function resolveCopilotAccessToken(params: {
   return result.token;
 }
 
-/** DEBUG: returns the raw /models JSON for inspection. Remove after debugging. */
-export async function fetchCopilotModelListRaw(params: {
-  githubToken: string;
-  signal?: AbortSignal;
-}): Promise<unknown> {
-  const jwt = await resolveCopilotAccessToken(params);
-  const response = await getFetch()(`${DEFAULT_COPILOT_API_BASE}/models`, {
-    method: "GET",
-    headers: buildCopilotHeaders(jwt),
-    signal: params.signal,
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Copilot model list fetch failed: ${response.status} ${response.statusText} - ${errorText}`,
-    );
-  }
-  return await response.json();
-}
 
 type CopilotModelEntry = {
   id?: string;
   name?: string;
   model_picker_enabled?: boolean;
+  model_picker_category?: string;
   capabilities?: {
     type?: string;
     supports?: {
@@ -873,8 +854,7 @@ function isCopilotModelUsable(m: CopilotModelEntry): boolean {
   if (m.capabilities?.type && m.capabilities.type !== "chat") return false;
   // Exclude models with disabled policy
   if (m.policy?.state === "disabled") return false;
-  // Exclude models that support neither /chat/completions nor /responses.
-  // If supported_endpoints is absent (older models), assume chat is supported.
+  // Exclude models that support neither /chat/completions nor /responses
   if (
     Array.isArray(m.supported_endpoints) &&
     !m.supported_endpoints.includes("/chat/completions") &&
@@ -882,13 +862,38 @@ function isCopilotModelUsable(m: CopilotModelEntry): boolean {
   ) {
     return false;
   }
+  // Exclude internal/legacy duplicates (model_picker_enabled=false with no category)
+  if (m.model_picker_enabled === false && !m.model_picker_category) return false;
+  // Exclude codex agent-only models (gated to VS Code agent, not usable via general API)
+  if (typeof m.id === "string" && /-codex($|-)/i.test(m.id)) return false;
+  // Exclude VS Code internal models (oswe = fine-tuned for VS Code Copilot)
+  if (typeof m.id === "string" && /^oswe-/i.test(m.id)) return false;
+  // Exclude grok-code models (gated to specific Copilot integrations)
+  if (typeof m.id === "string" && /^grok-code/i.test(m.id)) return false;
   return true;
 }
+
+function resolveCopilotModelProtocol(
+  endpoints: string[] | undefined,
+): ProviderProtocol | undefined {
+  if (!Array.isArray(endpoints) || !endpoints.length) return undefined;
+  const hasChat = endpoints.includes("/chat/completions");
+  const hasResponses = endpoints.includes("/responses");
+  // Only override when the model doesn't support the default (chat/completions)
+  if (!hasChat && hasResponses) return "responses_api";
+  return undefined; // chat-compatible or both → inherit group default
+}
+
+export type CopilotModelInfo = {
+  id: string;
+  name: string;
+  protocol?: ProviderProtocol;
+};
 
 export async function fetchCopilotModelList(params: {
   githubToken: string;
   signal?: AbortSignal;
-}): Promise<Array<{ id: string; name: string }>> {
+}): Promise<CopilotModelInfo[]> {
   const jwt = await resolveCopilotAccessToken(params);
   const response = await getFetch()(`${DEFAULT_COPILOT_API_BASE}/models`, {
     method: "GET",
@@ -904,16 +909,13 @@ export async function fetchCopilotModelList(params: {
   const payload = (await response.json()) as {
     data?: CopilotModelEntry[];
   };
-  const allModels = payload.data || [];
-  // Populate the endpoint cache for ALL models (including filtered ones)
-  for (const m of allModels) {
-    if (typeof m.id === "string" && m.id.trim() && Array.isArray(m.supported_endpoints)) {
-      setCopilotModelEndpoints(m.id.trim(), m.supported_endpoints);
-    }
-  }
-  return allModels
+  return (payload.data || [])
     .filter((m) => typeof m.id === "string" && m.id.trim() && isCopilotModelUsable(m))
-    .map((m) => ({ id: m.id!.trim(), name: (m.name || m.id || "").trim() }));
+    .map((m) => ({
+      id: m.id!.trim(),
+      name: (m.name || m.id || "").trim(),
+      protocol: resolveCopilotModelProtocol(m.supported_endpoints),
+    }));
 }
 
 async function readLocalFileBytes(path: string): Promise<Uint8Array> {

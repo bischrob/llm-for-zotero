@@ -27,6 +27,7 @@ import {
 } from "../utils/providerPresets";
 import {
   PROVIDER_PROTOCOL_SPECS,
+  isProviderProtocol,
   normalizeProviderProtocolForAuthMode,
   getProviderProtocolSpec,
   type ProviderProtocol,
@@ -37,7 +38,6 @@ import {
   pollCopilotDeviceAuth,
   resolveCopilotAccessToken,
   fetchCopilotModelList,
-  fetchCopilotModelListRaw,
 } from "../utils/llmClient";
 import {
   isMineruEnabled,
@@ -635,7 +635,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         if (nextAuthMode === "codex_auth") {
           group.providerProtocol = "codex_responses";
         } else if (nextAuthMode === "copilot_auth") {
-          group.providerProtocol = "responses_api";
+          group.providerProtocol = "openai_chat_compat";
         } else if (group.providerProtocol === "codex_responses") {
           group.providerProtocol =
             selectedPreset?.defaultProtocol || "openai_chat_compat";
@@ -690,6 +690,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         providerPresetLabel.setAttribute("for", providerPresetSelect.id);
 
         for (const preset of PROVIDER_PRESETS) {
+          // Copilot requires copilot_auth, not usable with API Key
+          if (preset.id === "copilot") continue;
           const option = el(doc, "option") as HTMLOptionElement;
           option.value = preset.id;
           option.textContent = preset.label;
@@ -1038,12 +1040,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           fetchModelsStatus.textContent = t("Fetching models…");
           fetchModelsStatus.style.color = "var(--fill-secondary, #888)";
           try {
-            // DEBUG: log raw /models response — remove after debugging
-            const rawModels = await fetchCopilotModelListRaw({
-              githubToken: group.apiKey,
-            });
-            ztoolkit.log("[Copilot DEBUG] Raw /models response:", JSON.stringify(rawModels, null, 2));
-
             const models = await fetchCopilotModelList({
               githubToken: group.apiKey,
             });
@@ -1052,20 +1048,24 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
               fetchModelsStatus.style.color = "red";
               return;
             }
-            const existingIds = new Set(group.models.map((m) => m.model.trim().toLowerCase()));
-            let added = 0;
-            for (const m of models) {
-              if (!existingIds.has(m.id.toLowerCase())) {
-                group.models.push(createProviderModelEntry(m.id));
-                added++;
-              }
+            // Build a map of existing models to preserve user-customized advanced settings
+            const existingAdvanced = new Map<string, ModelProviderModel>();
+            for (const m of group.models) {
+              existingAdvanced.set(m.model.trim().toLowerCase(), m);
             }
+            // Replace the entire model list with fetched models
+            group.models = models.map((m) => {
+              const existing = existingAdvanced.get(m.id.toLowerCase());
+              return createProviderModelEntry(
+                m.id,
+                existing ? { temperature: existing.temperature, maxTokens: existing.maxTokens, inputTokenCap: existing.inputTokenCap } : undefined,
+                m.protocol,
+              );
+            });
             persistGroups(groups);
-            fetchModelsStatus.textContent = added > 0
-              ? t("Added %n models").replace("%n", String(added))
-              : t("All models already added");
+            fetchModelsStatus.textContent = t("Synced %n models").replace("%n", String(models.length));
             fetchModelsStatus.style.color = "green";
-            if (added > 0) setTimeout(() => rerender(), 300);
+            setTimeout(() => rerender(), 300);
           } catch (err) {
             fetchModelsStatus.textContent = `✗ ${(err as Error).message}`;
             fetchModelsStatus.style.color = "red";
@@ -1198,7 +1198,30 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "optional",
         );
 
-        advFields.append(tempField.wrap, maxTokField.wrap, inputCapField.wrap);
+        // ── Per-model protocol override ──
+        const protocolFieldWrap = el(doc, "div", "display: flex; flex-direction: column; gap: 3px;");
+        const protocolFieldLabel = el(
+          doc,
+          "label",
+          "font-size: 10.5px; font-weight: 600; color: var(--fill-primary, inherit);",
+          t("Protocol"),
+        );
+        const protocolFieldSelect = el(doc, "select", INPUT_SM_STYLE + " width: 120px;") as HTMLSelectElement;
+        const autoOption = el(doc, "option") as HTMLOptionElement;
+        autoOption.value = "";
+        autoOption.textContent = t("auto");
+        protocolFieldSelect.appendChild(autoOption);
+        const allowedProtocols = getProtocolOptions(group.authMode, selectedPresetId);
+        for (const proto of allowedProtocols) {
+          const opt = el(doc, "option") as HTMLOptionElement;
+          opt.value = proto;
+          opt.textContent = getProviderProtocolSpec(proto).label;
+          protocolFieldSelect.appendChild(opt);
+        }
+        protocolFieldSelect.value = modelEntry.providerProtocol || "";
+        protocolFieldWrap.append(protocolFieldLabel, protocolFieldSelect);
+
+        advFields.append(tempField.wrap, maxTokField.wrap, inputCapField.wrap, protocolFieldWrap);
         advRow.append(
           advFields,
           el(
@@ -1213,6 +1236,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           modelEntry.temperature = normalizeTemperature(tempField.input.value);
           modelEntry.maxTokens = normalizeMaxTokens(maxTokField.input.value);
           modelEntry.inputTokenCap = normalizeOptionalInputTokenCap(inputCapField.input.value);
+          modelEntry.providerProtocol = isProviderProtocol(protocolFieldSelect.value)
+            ? protocolFieldSelect.value
+            : undefined;
           tempField.input.value = `${modelEntry.temperature}`;
           maxTokField.input.value = `${modelEntry.maxTokens}`;
           inputCapField.input.value =
@@ -1223,12 +1249,14 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           f.input.addEventListener("change", commitAdvanced);
           f.input.addEventListener("blur", commitAdvanced);
         }
+        protocolFieldSelect.addEventListener("change", commitAdvanced);
 
         const syncAdvAvailability = () => {
           const hasModel = Boolean(modelEntry.model.trim());
           advRow.style.opacity = hasModel ? "1" : "0.45";
           advRow.style.pointerEvents = hasModel ? "" : "none";
           for (const f of [tempField, maxTokField, inputCapField]) f.input.disabled = !hasModel;
+          protocolFieldSelect.disabled = !hasModel;
         };
         syncAdvAvailability();
 
