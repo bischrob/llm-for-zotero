@@ -1290,7 +1290,7 @@ export function renderEvidencePack(params: {
   candidates: PaperContextCandidate[];
 }): string {
   const { papers, candidates } = params;
-  if (!papers.length || !candidates.length) return "";
+  if (!papers.length) return "";
 
   const deduped = new Map<string, PaperContextCandidate>();
   for (const candidate of candidates) {
@@ -1321,18 +1321,21 @@ export function renderEvidencePack(params: {
   for (const [paperIndex, paper] of papers.entries()) {
     const paperKey = buildPaperKey(paper);
     const paperCandidates = byPaper.get(paperKey) || [];
-    if (!paperCandidates.length) continue;
     paperCandidates.sort((a, b) => a.chunkIndex - b.chunkIndex);
     const lines: string[] = [`Paper ${paperIndex + 1}`];
     lines.push(...formatPaperMetadataLines(paper));
-    lines.push("", "Evidence:");
-    for (const [candidateIndex, candidate] of paperCandidates.entries()) {
-      lines.push(`Evidence snippet ${candidateIndex + 1}`);
-      lines.push(`Section: ${candidate.sectionLabel || "Unlabeled body text"}`);
-      lines.push(`Source label: ${formatPaperSourceLabel(paper)}`);
-      lines.push("Quoted evidence:");
-      lines.push(formatMarkdownBlockquote(buildEvidenceQuoteText(candidate)));
-      lines.push("");
+    if (paperCandidates.length) {
+      lines.push("", "Evidence:");
+      for (const [candidateIndex, candidate] of paperCandidates.entries()) {
+        lines.push(`Evidence snippet ${candidateIndex + 1}`);
+        lines.push(`Section: ${candidate.sectionLabel || "Unlabeled body text"}`);
+        lines.push(`Source label: ${formatPaperSourceLabel(paper)}`);
+        lines.push("Quoted evidence:");
+        lines.push(formatMarkdownBlockquote(buildEvidenceQuoteText(candidate)));
+        lines.push("");
+      }
+    } else {
+      lines.push("", "(No retrieved snippets for this paper in this turn.)");
     }
     blocks.push(lines.join("\n").trimEnd());
   }

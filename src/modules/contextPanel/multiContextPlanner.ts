@@ -200,163 +200,6 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   return intersection / union;
 }
 
-function tokenizeForMatching(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]{3,}/g) || [];
-}
-
-function hasPaperQuestionSignals(question: string): boolean {
-  const normalized = question.toLowerCase();
-  if (!normalized.trim()) return false;
-  if (
-    /\b(paper|study|article|author|method|methodology|experiment|result|finding|conclusion|limitation|evidence|dataset|table|figure|section|citation|related work|ablation|baseline)\b/.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-  if (
-    /\b(compare|contrast|difference|similarity|why|how|what about|based on)\b/.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-  if (/\b(this|that|these|those|it|they|them)\b/.test(normalized)) {
-    return true;
-  }
-  return false;
-}
-
-function isObviouslyContextFreeQuestion(question: string): boolean {
-  const normalized = question.trim().toLowerCase();
-  if (!normalized) return true;
-  if (
-    /^(hi|hello|hey|thanks|thank you|thx|ok|okay|cool|great|sounds good|got it)[.!?]*$/.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function normalizeTextForLookup(value: string | undefined): string {
-  return sanitizeText(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function collectPaperReferenceTokens(
-  paperContext: PaperContextRef,
-): Set<string> {
-  const tokens = new Set<string>();
-  const add = (value: string | undefined) => {
-    const terms = tokenizeForMatching(value || "");
-    for (const term of terms) tokens.add(term);
-  };
-  add(paperContext.title);
-  add(paperContext.firstCreator);
-  add(paperContext.citationKey);
-  if (paperContext.year && /^\d{4}$/.test(paperContext.year.trim())) {
-    tokens.add(paperContext.year.trim());
-  }
-  return tokens;
-}
-
-function parseOrdinalTargets(question: string): Set<number> {
-  const normalized = question.toLowerCase();
-  const out = new Set<number>();
-  const numericMatches = normalized.match(/\bpaper\s*(\d+)\b/g) || [];
-  for (const match of numericMatches) {
-    const raw = match.replace(/[^0-9]/g, "");
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) out.add(parsed);
-  }
-  if (/\bfirst\b/.test(normalized)) out.add(1);
-  if (/\bsecond\b/.test(normalized)) out.add(2);
-  if (/\bthird\b/.test(normalized)) out.add(3);
-  if (/\bfourth\b/.test(normalized)) out.add(4);
-  if (/\bfifth\b/.test(normalized)) out.add(5);
-  return out;
-}
-
-function rankUnpinnedPapersByQuestion(params: {
-  papers: PlannerPaperEntry[];
-  question: string;
-}): PlannerPaperEntry[] {
-  if (!params.papers.length) return [];
-  if (isObviouslyContextFreeQuestion(params.question)) return [];
-
-  const questionText = normalizeTextForLookup(params.question);
-  const questionTokens = new Set(tokenizeForMatching(questionText));
-  const ordinalTargets = parseOrdinalTargets(questionText);
-
-  const scored = params.papers.map((paper) => {
-    let score = 0;
-    let explicit = false;
-    if (ordinalTargets.has(paper.order)) {
-      score += 10;
-      explicit = true;
-    }
-
-    const citation = normalizeTextForLookup(paper.paperContext.citationKey);
-    if (citation && questionText.includes(citation)) {
-      score += 8;
-      explicit = true;
-    }
-
-    const author = normalizeTextForLookup(paper.paperContext.firstCreator);
-    if (author) {
-      const authorTokens = tokenizeForMatching(author);
-      for (const authorToken of authorTokens) {
-        if (questionTokens.has(authorToken)) {
-          score += 4;
-          explicit = true;
-          break;
-        }
-      }
-    }
-
-    const year = normalizeTextForLookup(paper.paperContext.year);
-    if (year && questionText.includes(year)) {
-      score += 2;
-      explicit = true;
-    }
-
-    const paperTokens = collectPaperReferenceTokens(paper.paperContext);
-    let overlap = 0;
-    for (const token of paperTokens) {
-      if (questionTokens.has(token)) overlap += 1;
-    }
-    score += overlap;
-    if (overlap >= 2) explicit = true;
-
-    return { paper, score, explicit };
-  });
-
-  const explicitHits = scored.filter(
-    (entry) => entry.explicit && entry.score > 0,
-  );
-  if (explicitHits.length) {
-    explicitHits.sort((a, b) => b.score - a.score);
-    return explicitHits.map((entry) => entry.paper);
-  }
-
-  const questionLooksPaperGrounded = hasPaperQuestionSignals(questionText);
-  if (!questionLooksPaperGrounded) {
-    return [];
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-  const positive = scored
-    .filter((entry) => entry.score > 0)
-    .map((entry) => entry.paper);
-  if (positive.length) {
-    return positive.slice(0, Math.min(2, positive.length));
-  }
-  return params.papers.slice(0, 1);
-}
-
 type RetrievedAssembly = {
   contextText: string;
   selectedChunkCount: number;
@@ -698,16 +541,13 @@ function buildMinChunkMapForRetrievedPapers(
 ): Map<string, number> {
   const out = new Map<string, number>();
   for (const paper of papers) {
-    if (paper.pinKind === "none") {
-      out.set(paper.paperKey, 0);
-      continue;
+    if (paper.isActive) {
+      out.set(paper.paperKey, RETRIEVAL_MIN_ACTIVE_PAPER_CHUNKS);
+    } else {
+      // Every paper in context gets at least 1 chunk so the LLM is aware of
+      // all papers, even when they are unpinned / retrieval-only.
+      out.set(paper.paperKey, RETRIEVAL_MIN_OTHER_PAPER_CHUNKS);
     }
-    out.set(
-      paper.paperKey,
-      paper.isActive
-        ? RETRIEVAL_MIN_ACTIVE_PAPER_CHUNKS
-        : RETRIEVAL_MIN_OTHER_PAPER_CHUNKS,
-    );
   }
   return out;
 }
@@ -899,10 +739,6 @@ export async function resolveMultiContextPlan(params: {
     (paper) => paper.pinKind === "explicit",
   );
   const unpinned = papers.filter((paper) => paper.pinKind === "none");
-  const relevantUnpinned = rankUnpinnedPapersByQuestion({
-    papers: unpinned,
-    question: params.question,
-  });
   const activePaper = papers.find((paper) => paper.isActive) || papers[0] || null;
   const firstPaperTurn =
     params.conversationMode === "paper" && isFirstPaperTurn(params.history);
@@ -1024,9 +860,9 @@ export async function resolveMultiContextPlan(params: {
         adjustedContextBudget.contextBudgetTokens - full.estimatedTokens,
       );
       let extraUnpinned: RetrievedAssembly | null = null;
-      if (remainingTokens >= 1024 && relevantUnpinned.length) {
+      if (remainingTokens >= 1024 && unpinned.length) {
         extraUnpinned = await assembleRetrievedMultiPaperContext({
-          papers: relevantUnpinned,
+          papers: unpinned,
           question: params.question,
           contextBudgetTokens: remainingTokens,
           minChunksByPaper: new Map<string, number>(),
@@ -1077,7 +913,7 @@ export async function resolveMultiContextPlan(params: {
         ...fullPreferredPapers.filter(
           (paper) => !partialFull.includedPaperKeys.has(paper.paperKey),
         ),
-        ...relevantUnpinned.filter(
+        ...unpinned.filter(
           (paper) => !partialFull.includedPaperKeys.has(paper.paperKey),
         ),
       ];
@@ -1123,7 +959,8 @@ export async function resolveMultiContextPlan(params: {
     }
   }
 
-  const retrievalPapers = [...fullTextPapers, ...relevantUnpinned];
+  // All papers were explicitly selected by the user — always include every one.
+  const retrievalPapers = [...fullTextPapers, ...unpinned];
   if (!retrievalPapers.length) {
     return {
       mode: "retrieval",

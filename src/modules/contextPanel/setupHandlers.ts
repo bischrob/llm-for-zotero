@@ -9363,10 +9363,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (!paperContext) return;
       e.preventDefault();
       e.stopPropagation();
-      const nextMode =
-        resolvePaperContextNextSendMode(item.id, paperContext) === "full-sticky"
-          ? "retrieval"
-          : "full-sticky";
+      const currentMode = resolvePaperContextNextSendMode(item.id, paperContext);
+      const nextMode = isPaperContextFullTextMode(currentMode)
+        ? "retrieval"
+        : "full-sticky";
       setPaperModeOverride(item.id, paperContext, nextMode);
       paperChip.dataset.fullText = isPaperContextFullTextMode(nextMode)
         ? "true"
