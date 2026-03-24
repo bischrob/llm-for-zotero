@@ -56,6 +56,10 @@ type SendFlowControllerDeps = {
   resolvePdfPaperAttachments: (
     paperContexts: PaperContextRef[],
   ) => Promise<ChatAttachment[]>;
+  renderPdfPagesAsImages: (
+    paperContexts: PaperContextRef[],
+  ) => Promise<ChatAttachment[]>;
+  getModelPdfSupport: (modelName: string, providerProtocol?: string) => "native" | "vision" | "none";
   getSelectedFiles: (itemId: number) => ChatAttachment[];
   getSelectedImages: (itemId: number) => string[];
   resolvePromptText: (
@@ -194,9 +198,25 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
       item,
       selectedPaperContexts,
     );
-    const pdfAttachments = pdfModePaperContexts.length
-      ? await deps.resolvePdfPaperAttachments(pdfModePaperContexts)
-      : [];
+    // Resolve PDF-mode papers based on model capability
+    const earlyProfile = deps.getSelectedProfile();
+    const earlyModelName = (
+      earlyProfile?.model || deps.getCurrentModelName() || ""
+    ).trim();
+    const pdfSupport = deps.getModelPdfSupport(earlyModelName, earlyProfile?.providerProtocol);
+    let pdfAttachments: ChatAttachment[] = [];
+    if (pdfModePaperContexts.length) {
+      if (pdfSupport === "none") {
+        deps.setStatusMessage?.(
+          "This model does not support PDF or image input. PDF papers were skipped.",
+          "error",
+        );
+      } else if (pdfSupport === "vision") {
+        pdfAttachments = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
+      } else {
+        pdfAttachments = await deps.resolvePdfPaperAttachments(pdfModePaperContexts);
+      }
+    }
     const selectedFiles = [
       ...deps.getSelectedFiles(item.id),
       ...pdfAttachments,

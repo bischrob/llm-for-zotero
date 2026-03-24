@@ -9,6 +9,25 @@ export function isScreenshotUnsupportedModel(modelName: string): boolean {
   return /^deepseek-(?:chat|reasoner)(?:$|[.-])/.test(normalized);
 }
 
+export type ModelPdfSupport = "native" | "vision" | "none";
+
+export function getModelPdfSupport(
+  modelName: string,
+  providerProtocol?: string,
+): ModelPdfSupport {
+  const m = modelName.trim().toLowerCase();
+  // Text-only models: no PDF, no vision
+  if (isScreenshotUnsupportedModel(m)) return "none";
+  if (/reasoner|text-only|embedding/.test(m)) return "none";
+  // Only first-party APIs support native PDF file upload
+  const proto = (providerProtocol || "").trim().toLowerCase();
+  if (proto === "anthropic") return "native";
+  if (proto === "gemini-native") return "native";
+  if (proto === "openai" && /gpt-4o|gpt-5|o[1-9]|chatgpt/.test(m)) return "native";
+  // OpenAI-compatible and unknown protocols: fall back to vision (page images)
+  return "vision";
+}
+
 export function getScreenshotDisabledHint(modelName: string): string {
   const label = modelName.trim() || "current model";
   return `Screenshots are disabled for ${label}`;

@@ -3306,6 +3306,21 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       }
 
       const paperContexts = normalizePaperContexts(msg.paperContexts);
+      // Determine which papers were sent in PDF mode (have pdf-paper-* attachments)
+      const pdfPaperContextItemIds = new Set(
+        (Array.isArray(msg.attachments) ? msg.attachments : [])
+          .filter((a) => typeof a?.id === "string" && a.id.startsWith("pdf-paper-"))
+          .map((a) => {
+            const m = a.id.match(/^pdf-paper-(\d+)-/);
+            return m ? Number(m[1]) : 0;
+          })
+          .filter((id) => id > 0),
+      );
+      const fullTextPaperKeys = new Set(
+        normalizePaperContexts(msg.fullTextPaperContexts).map(
+          (p) => `${p.itemId}:${p.contextItemId}`,
+        ),
+      );
       hasUserContext = hasUserContext || paperContexts.length > 0;
       if (paperContexts.length) {
         const papersBar = doc.createElement("button") as HTMLButtonElement;
@@ -3346,7 +3361,18 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           ].filter(Boolean);
           paperMeta.textContent = metaParts.join(" · ") || "Supplemental paper";
           paperMeta.title = paperMeta.textContent;
-          paperItem.append(paperTitle, paperMeta);
+
+          // Content source mode badge
+          const isPdf = pdfPaperContextItemIds.has(paperContext.contextItemId);
+          const isFullText = fullTextPaperKeys.has(`${paperContext.itemId}:${paperContext.contextItemId}`);
+          if (isPdf || isFullText) {
+            const badge = doc.createElement("span") as HTMLSpanElement;
+            badge.className = `llm-user-papers-item-badge llm-user-papers-item-badge-${isPdf ? "pdf" : "text"}`;
+            badge.textContent = isPdf ? "PDF" : "Text";
+            paperItem.append(paperTitle, paperMeta, badge);
+          } else {
+            paperItem.append(paperTitle, paperMeta);
+          }
           papersList.appendChild(paperItem);
         }
         papersExpandedEl.appendChild(papersList);
@@ -3392,7 +3418,9 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
               entry &&
               typeof entry === "object" &&
               entry.category !== "image" &&
-              typeof entry.name === "string",
+              typeof entry.name === "string" &&
+              // Exclude PDF-paper attachments (shown under paper context instead)
+              !(typeof entry.id === "string" && entry.id.startsWith("pdf-paper-")),
           )
         : [];
       hasUserContext = hasUserContext || fileAttachments.length > 0;

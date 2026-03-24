@@ -1255,3 +1255,90 @@ export class PdfPageService {
     };
   }
 }
+
+/**
+ * Render all pages of a Zotero PDF attachment as PNG images.
+ * Opens the PDF in a reader tab, renders up to maxPages, persists each as a
+ * blob, then restores the previous tab. Intended for sending PDF content to
+ * vision-only models that lack native PDF support.
+ */
+export async function renderAllPdfPages(
+  contextItemId: number,
+  opts?: { maxPages?: number },
+): Promise<{ storedPath: string; contentHash: string; pageIndex: number }[]> {
+  const maxPages = opts?.maxPages ?? 20;
+  const savedTabId = getLastKnownSelectedTabId();
+  try {
+    const reader = await openReaderForItem(contextItemId, {
+      pageIndex: 0,
+      pageLabel: "1",
+    });
+    if (!reader) throw new Error("Could not open PDF reader");
+    const app = await waitForPdfDocument(reader);
+    if (!app?.pdfDocument)
+      throw new Error("Could not load PDF document");
+    const pdfDocument = unwrapWrappedJsObject(
+      app.pdfDocument as { numPages?: number; getPage?: (n: number) => Promise<unknown> },
+    );
+    const rawCount = Number(
+      pdfDocument?.numPages ??
+        (app as { pdfDocument?: { numPages?: number } })?.pdfDocument?.numPages ??
+        0,
+    );
+    const numPages = Math.min(
+      maxPages,
+      Number.isFinite(rawCount) && rawCount > 0 ? Math.floor(rawCount) : 0,
+    );
+    if (numPages <= 0) throw new Error("PDF has no pages");
+
+    const results: { storedPath: string; contentHash: string; pageIndex: number }[] = [];
+    for (let i = 0; i < numPages; i++) {
+      await navigateReaderToPage(reader, i, `${i + 1}`);
+      let bytes = await captureRenderedReaderPage(app, reader, i);
+      if (!bytes) {
+        // Fallback: render via PDF.js API directly
+        const canvasDoc =
+          getReaderDocument(reader) ||
+          Zotero.getMainWindow?.()?.document;
+        if (canvasDoc && typeof pdfDocument?.getPage === "function") {
+          const pdfPage = resolveRenderablePdfPage(
+            await pdfDocument.getPage(i + 1),
+          );
+          if (pdfPage) {
+            const viewport = pdfPage.getViewport({ scale: 1.8 });
+            const canvas = canvasDoc.createElement("canvas") as HTMLCanvasElement;
+            canvas.width = Math.max(1, Math.ceil(viewport.width));
+            canvas.height = Math.max(1, Math.ceil(viewport.height));
+            const context = canvas.getContext("2d");
+            if (context) {
+              const renderTask = pdfPage.render({ canvasContext: context, viewport });
+              if (
+                renderTask && typeof renderTask === "object" &&
+                "promise" in renderTask && renderTask.promise
+              ) {
+                await renderTask.promise;
+              } else if (
+                renderTask &&
+                (typeof renderTask === "object" || typeof renderTask === "function") &&
+                "then" in renderTask && typeof renderTask.then === "function"
+              ) {
+                await renderTask;
+              }
+              bytes = await canvasToBytes(canvas);
+            }
+          }
+        }
+      }
+      if (!bytes) continue; // skip unrenderable pages
+      const persisted = await persistAttachmentBlob(`page-${i + 1}.png`, bytes);
+      results.push({
+        storedPath: persisted.storedPath,
+        contentHash: persisted.contentHash,
+        pageIndex: i,
+      });
+    }
+    return results;
+  } finally {
+    restoreNonReaderTab(savedTabId);
+  }
+}

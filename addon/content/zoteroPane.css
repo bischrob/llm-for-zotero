@@ -1584,7 +1584,7 @@
 
 .llm-user-papers-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px;
   padding: 7px 9px;
   border: 1px solid var(--stroke-secondary);
@@ -1598,6 +1598,7 @@
 
 .llm-user-papers-item-title {
   display: block;
+  grid-column: 1;
   color: var(--fill-primary);
   font-size: var(--llm-fs-11);
   font-weight: 600;
@@ -1609,12 +1610,40 @@
 
 .llm-user-papers-item-meta {
   display: block;
+  grid-column: 1;
   color: var(--fill-tertiary);
   font-size: var(--llm-fs-10);
   line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.llm-user-papers-item-badge {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: var(--llm-fs-10);
+  line-height: 1.2;
+}
+
+.llm-user-papers-item-badge-pdf {
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  color: #8b5cf6;
+}
+
+.llm-user-papers-item-badge-text {
+  background: color-mix(in srgb, var(--color-accent, #3584e4) 14%, transparent);
+  color: var(--color-accent, #3584e4);
+}
+
+.llm-user-papers-item-badge-md {
+  background: color-mix(in srgb, #10b981 18%, transparent);
+  color: #10b981;
 }
 
 .llm-user-papers-item-key {

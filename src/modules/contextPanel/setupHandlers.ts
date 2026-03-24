@@ -260,6 +260,7 @@ import {
   isReasoningDisplayLabelActive,
   getScreenshotDisabledHint,
   isScreenshotUnsupportedModel,
+  getModelPdfSupport,
 } from "./setupHandlers/controllers/modelReasoningController";
 import {
   GLOBAL_HISTORY_UNDO_WINDOW_MS,
@@ -7965,6 +7966,30 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
       return results;
     },
+    renderPdfPagesAsImages: async (paperContexts) => {
+      const { renderAllPdfPages } = await import("../../agent/services/pdfPageService");
+      const results: import("./types").ChatAttachment[] = [];
+      for (const pc of paperContexts) {
+        try {
+          const pages = await renderAllPdfPages(pc.contextItemId, { maxPages: 20 });
+          for (const page of pages) {
+            results.push({
+              id: `pdf-page-${pc.contextItemId}-${page.pageIndex}-${Date.now()}`,
+              name: `${pc.title || "PDF"} - page ${page.pageIndex + 1}.png`,
+              mimeType: "image/png",
+              sizeBytes: 0,
+              category: "image",
+              storedPath: page.storedPath,
+              contentHash: page.contentHash,
+            });
+          }
+        } catch (err) {
+          ztoolkit.log("LLM: Failed to render PDF pages for", pc.contextItemId, err);
+        }
+      }
+      return results;
+    },
+    getModelPdfSupport: (modelName, protocol) => getModelPdfSupport(modelName, protocol),
     getSelectedFiles: (itemId) => selectedFileAttachmentCache.get(itemId) || [],
     getSelectedImages: (itemId) => selectedImageCache.get(itemId) || [],
     resolvePromptText,
