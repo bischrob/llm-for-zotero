@@ -558,8 +558,8 @@ function buildMetadataDiffRows(
         })
         .filter(Boolean)
         .join("; ");
-    } catch {
-      // Best effort — proceed with empty before values
+    } catch (err) {
+      ztoolkit.log("LLM: Review card metadata patch failed (best-effort)", err);
     }
   }
 

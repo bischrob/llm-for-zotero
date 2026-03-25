@@ -21,6 +21,7 @@ import {
   parseToolCallArguments,
   readFileRefAsBase64,
 } from "./shared";
+import { resolveContentParts } from "./adapterUtils";
 
 type ChatCompletionChoice = {
   message?: {
@@ -61,23 +62,15 @@ async function buildMessagesPayload(messages: AgentModelMessage[]) {
     if (typeof message.content === "string") {
       content = message.content;
     } else {
+      const resolved = await resolveContentParts(message);
       const parts: unknown[] = [];
-      for (const part of message.content) {
-        if (part.type === "text") {
-          parts.push(part);
-        } else if (part.type === "image_url") {
-          parts.push({ type: "image_url" as const, image_url: part.image_url });
-        } else if (
-          part.type === "file_ref" &&
-          part.file_ref.mimeType === "application/pdf"
-        ) {
-          const data = await readFileRefAsBase64(part.file_ref.storedPath);
-          parts.push({
-            type: "image_url" as const,
-            image_url: { url: `data:application/pdf;base64,${data}` },
-          });
+      for (const rp of resolved) {
+        switch (rp.type) {
+          case "text": parts.push({ type: "text", text: rp.text }); break;
+          case "image": parts.push({ type: "image_url", image_url: { url: `data:${rp.mimeType};base64,${rp.base64}` } }); break;
+          case "pdf": parts.push({ type: "image_url", image_url: { url: `data:application/pdf;base64,${rp.base64}` } }); break;
+          // file_placeholder: silently dropped (no provider support)
         }
-        // Non-PDF file_refs are silently dropped (no provider support)
       }
       content = parts;
     }
@@ -208,8 +201,8 @@ async function parseOpenAIChatCompletionStream(
               }
             }
           }
-        } catch {
-          // skip malformed SSE lines
+        } catch (err) {
+          ztoolkit.log("LLM: Malformed SSE line in OpenAI stream", err);
         }
       }
     }

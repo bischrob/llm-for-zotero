@@ -5,6 +5,8 @@
  * - Send mode overrides (retrieval / full-next / full-sticky)
  * - Content source overrides (text / mineru / pdf)
  * - State clearing and lifecycle
+ *
+ * Override maps use flat composite keys: "ownerItemId:paperKey"
  */
 
 import type {
@@ -23,13 +25,18 @@ import { buildPaperKey } from "../pdfContext";
 import { normalizePaperContextRefs } from "../normalizers";
 import { sanitizeText } from "../textUtils";
 
+/** Builds the flat composite key for override maps. */
+function overrideKey(itemId: number, paperContext: PaperContextRef): string {
+  return `${itemId}:${buildPaperKey(paperContext)}`;
+}
+
 // ── Send mode overrides ────────────────────────────────────────────────────
 
 export function getPaperModeOverride(
   itemId: number,
   paperContext: PaperContextRef,
 ): PaperContextSendMode | null {
-  return paperContextModeOverrides.get(itemId)?.get(buildPaperKey(paperContext)) || null;
+  return paperContextModeOverrides.get(overrideKey(itemId, paperContext)) || null;
 }
 
 export function setPaperModeOverride(
@@ -37,16 +44,14 @@ export function setPaperModeOverride(
   paperContext: PaperContextRef,
   mode: PaperContextSendMode,
 ): void {
-  let overrides = paperContextModeOverrides.get(itemId);
-  if (!overrides) {
-    overrides = new Map<string, PaperContextSendMode>();
-    paperContextModeOverrides.set(itemId, overrides);
-  }
-  overrides.set(buildPaperKey(paperContext), mode);
+  paperContextModeOverrides.set(overrideKey(itemId, paperContext), mode);
 }
 
 export function clearPaperModeOverrides(itemId: number): void {
-  paperContextModeOverrides.delete(itemId);
+  const prefix = `${itemId}:`;
+  for (const key of Array.from(paperContextModeOverrides.keys())) {
+    if (key.startsWith(prefix)) paperContextModeOverrides.delete(key);
+  }
 }
 
 export function isPaperContextFullTextMode(
@@ -61,7 +66,7 @@ export function getPaperContentSourceOverride(
   itemId: number,
   paperContext: PaperContextRef,
 ): PaperContentSourceMode | null {
-  return paperContentSourceOverrides.get(itemId)?.get(buildPaperKey(paperContext)) || null;
+  return paperContentSourceOverrides.get(overrideKey(itemId, paperContext)) || null;
 }
 
 export function setPaperContentSourceOverride(
@@ -69,16 +74,14 @@ export function setPaperContentSourceOverride(
   paperContext: PaperContextRef,
   mode: PaperContentSourceMode,
 ): void {
-  let overrides = paperContentSourceOverrides.get(itemId);
-  if (!overrides) {
-    overrides = new Map<string, PaperContentSourceMode>();
-    paperContentSourceOverrides.set(itemId, overrides);
-  }
-  overrides.set(buildPaperKey(paperContext), mode);
+  paperContentSourceOverrides.set(overrideKey(itemId, paperContext), mode);
 }
 
 export function clearPaperContentSourceOverrides(itemId: number): void {
-  paperContentSourceOverrides.delete(itemId);
+  const prefix = `${itemId}:`;
+  for (const key of Array.from(paperContentSourceOverrides.keys())) {
+    if (key.startsWith(prefix)) paperContentSourceOverrides.delete(key);
+  }
 }
 
 export function getNextContentSourceMode(

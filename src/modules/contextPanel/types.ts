@@ -237,3 +237,54 @@ export type ZoteroTabsState = {
   selectedType?: string;
   _tabs?: Array<{ id?: string | number; type?: string; data?: any }>;
 };
+
+// ── Send flow options ─────────────────────────────────────────────────────
+
+import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
+
+export type SendQuestionOptions = {
+  body: Element;
+  item: Zotero.Item;
+  question: string;
+  images?: string[];
+  model?: string;
+  apiBase?: string;
+  apiKey?: string;
+  reasoning?: LLMReasoningConfig;
+  advanced?: AdvancedModelParams;
+  displayQuestion?: string;
+  selectedTexts?: string[];
+  selectedTextSources?: SelectedTextSource[];
+  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
+  paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
+  attachments?: ChatAttachment[];
+  runtimeMode?: ChatRuntimeMode;
+  agentRunId?: string;
+  skipAgentDispatch?: boolean;
+  pdfModePaperKeys?: Set<string>;
+  /** System messages injected by provider-side PDF upload (Qwen fileid://, Kimi extracted text). */
+  pdfUploadSystemMessages?: string[];
+};
+
+export type EditRetryOptions = {
+  body: Element;
+  item: Zotero.Item;
+  displayQuestion: string;
+  selectedTexts?: string[];
+  selectedTextSources?: SelectedTextSource[];
+  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
+  screenshotImages?: string[];
+  paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
+  attachments?: ChatAttachment[];
+  targetRuntimeMode?: ChatRuntimeMode;
+  expected?: { conversationKey: number; userTimestamp: number; assistantTimestamp: number };
+  model?: string;
+  apiBase?: string;
+  apiKey?: string;
+  reasoning?: LLMReasoningConfig;
+  advanced?: AdvancedModelParams;
+};

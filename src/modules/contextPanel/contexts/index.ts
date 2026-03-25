@@ -1,19 +1,37 @@
 export type { ContextModule, ContextRegistry, PreviewRenderParams } from "./contextModule";
 
+// ── Paper context state ──
 export {
-  // Send mode overrides
   getPaperModeOverride,
   setPaperModeOverride,
   clearPaperModeOverrides,
   isPaperContextFullTextMode,
-  // Content source overrides
   getPaperContentSourceOverride,
   setPaperContentSourceOverride,
   clearPaperContentSourceOverrides,
   getNextContentSourceMode,
-  // State clearing
   clearSelectedPaperState,
   clearAllRefContextState,
-  // Helpers
   normalizePaperContextEntries,
 } from "./paperContextState";
+
+// ── Image context state ──
+export {
+  clearSelectedImageState,
+  retainPinnedImageState,
+} from "./imageContextState";
+
+// ── File context state ──
+export {
+  clearSelectedFileState,
+  retainPinnedFileState,
+} from "./fileContextState";
+
+// ── Text context state ──
+export {
+  clearSelectedTextState,
+  retainPinnedTextState,
+} from "./textContextState";
+
+// ── Utilities ──
+export { TTLMap } from "./ttlMap";

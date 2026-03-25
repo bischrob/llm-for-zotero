@@ -97,14 +97,9 @@ export const selectedFileAttachmentCache = new Map<number, ChatAttachment[]>();
 export const selectedFilePreviewExpandedCache = new Map<number, boolean>();
 export const selectedPaperContextCache = new Map<number, PaperContextRef[]>();
 export const selectedOtherRefContextCache = new Map<number, OtherContextRef[]>();
-export const paperContextModeOverrides = new Map<
-  number,
-  Map<string, PaperContextSendMode>
->();
-export const paperContentSourceOverrides = new Map<
-  number,
-  Map<string, PaperContentSourceMode>
->();
+// Flat override maps: key = "ownerItemId:paperItemId:contextItemId"
+export const paperContextModeOverrides = new Map<string, PaperContextSendMode>();
+export const paperContentSourceOverrides = new Map<string, PaperContentSourceMode>();
 // Stores the contextItemId of the currently expanded (sticky) paper chip, or false/undefined if none
 export const selectedPaperPreviewExpandedCache = new Map<number, number | false>();
 export const activeGlobalConversationByLibrary = new Map<number, number>();

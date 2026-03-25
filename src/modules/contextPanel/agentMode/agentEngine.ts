@@ -191,28 +191,7 @@ export type AgentEngineDeps = {
   ) => Promise<void>;
 
   // Chat fallback (when model does not support tool calls)
-  sendChatFallback: (
-    body: Element,
-    item: Zotero.Item,
-    question: string,
-    images: string[] | undefined,
-    model: string | undefined,
-    apiBase: string | undefined,
-    apiKey: string | undefined,
-    reasoning: LLMReasoningConfig | undefined,
-    advanced: AdvancedModelParams | undefined,
-    displayQuestion: string | undefined,
-    selectedTexts: string[] | undefined,
-    selectedTextSources: SelectedTextSource[] | undefined,
-    selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
-    selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined,
-    paperContexts: PaperContextRef[] | undefined,
-    fullTextPaperContexts: PaperContextRef[] | undefined,
-    attachments: ChatAttachment[] | undefined,
-    runtimeMode: "agent",
-    agentRunId: string | undefined,
-    skipAgentDispatch: true,
-  ) => Promise<void>;
+  sendChatFallback: (opts: import("../types").SendQuestionOptions) => Promise<void>;
 
   // Agent runtime
   getAgentRuntime: () => AgentRuntime;
@@ -226,25 +205,32 @@ export type AgentEngineDeps = {
 // ---------------------------------------------------------------------------
 
 export async function sendAgentTurn(
-  body: Element,
-  item: Zotero.Item,
-  question: string,
-  images: string[] | undefined,
-  model: string | undefined,
-  apiBase: string | undefined,
-  apiKey: string | undefined,
-  reasoning: LLMReasoningConfig | undefined,
-  advanced: AdvancedModelParams | undefined,
-  displayQuestion: string | undefined,
-  selectedTexts: string[] | undefined,
-  selectedTextSources: SelectedTextSource[] | undefined,
-  selectedTextPaperContexts: (PaperContextRef | undefined)[] | undefined,
-  selectedTextNoteContexts: (NoteContextRef | undefined)[] | undefined,
-  paperContexts: PaperContextRef[] | undefined,
-  fullTextPaperContexts: PaperContextRef[] | undefined,
-  attachments: ChatAttachment[] | undefined,
+  opts: {
+    body: Element;
+    item: Zotero.Item;
+    question: string;
+    images?: string[];
+    model?: string;
+    apiBase?: string;
+    apiKey?: string;
+    reasoning?: LLMReasoningConfig;
+    advanced?: AdvancedModelParams;
+    displayQuestion?: string;
+    selectedTexts?: string[];
+    selectedTextSources?: SelectedTextSource[];
+    selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+    selectedTextNoteContexts?: (NoteContextRef | undefined)[];
+    paperContexts?: PaperContextRef[];
+    fullTextPaperContexts?: PaperContextRef[];
+    attachments?: ChatAttachment[];
+  },
   deps: AgentEngineDeps,
 ): Promise<void> {
+  const {
+    body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
+    displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
+    selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+  } = opts;
   await deps.ensureConversationLoaded(item);
   const conversationKey = deps.getConversationKey(item);
   const history = deps.chatHistory.get(conversationKey) || [];
@@ -293,28 +279,14 @@ export async function sendAgentTurn(
       request: runtimeRequest,
     });
     if (fallback.kind === "fallback") {
-      await deps.sendChatFallback(
-        body,
-        item,
-        question,
-        images,
-        model,
-        apiBase,
-        apiKey,
-        reasoning,
-        advanced,
-        displayQuestion,
-        selectedTexts,
-        selectedTextSources,
-        selectedTextPaperContexts,
-        selectedTextNoteContexts,
-        paperContexts,
-        fullTextPaperContexts,
-        attachments,
-        "agent",
-        fallback.runId,
-        true,
-      );
+      await deps.sendChatFallback({
+        body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
+        displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
+        selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+        runtimeMode: "agent",
+        agentRunId: fallback.runId,
+        skipAgentDispatch: true,
+      });
       return;
     }
   }

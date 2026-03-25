@@ -72,6 +72,16 @@ function buildPinnedNoteKey(
   return noteItemId ? `legacy:${noteItemId}:${noteContext.noteKind}` : "-";
 }
 
+/** Simple FNV-1a hash for short, collision-resistant text fingerprints. */
+function hashText(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 export function buildPinnedSelectedTextKey(
   context: SelectedTextContext,
 ): string {
@@ -88,7 +98,9 @@ export function buildPinnedSelectedTextKey(
   const pageIndex = Number.isFinite(context.pageIndex)
     ? Math.max(0, Math.floor(context.pageIndex!))
     : -1;
-  return `${source}\u241f${noteKey}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${text}`;
+  // Use text hash instead of full text to keep keys short and stable
+  const textHash = hashText(text);
+  return `${source}\u241f${noteKey}\u241f${paperKey}\u241f${contextItemId}\u241f${pageIndex}\u241f${textHash}`;
 }
 
 export function buildPinnedImageKey(imageUrl: string): string {

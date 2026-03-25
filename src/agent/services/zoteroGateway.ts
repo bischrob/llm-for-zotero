@@ -732,7 +732,8 @@ export class ZoteroGateway {
         try {
           const stateNum = await Zotero.Fulltext.getIndexedState(att);
           indexingState = FULLTEXT_INDEX_STATE_MAP[stateNum] ?? "unavailable";
-        } catch {
+        } catch (err) {
+          ztoolkit.log("LLM: Fulltext index state check failed", err);
           indexingState = "unavailable";
         }
         // Check if MinerU has parsed this PDF
@@ -743,7 +744,7 @@ export class ZoteroGateway {
           if (await hasCachedMineruMd(att.id)) {
             mineruCacheDir = getMineruItemDir(att.id);
           }
-        } catch { /* MinerU cache not available */ }
+        } catch (err) { ztoolkit.log("LLM: MinerU cache check failed", err); }
       }
       results.push({
         contextItemId: att.id,
@@ -1515,8 +1516,8 @@ export class ZoteroGateway {
     try {
       const stateNum = await Zotero.Fulltext.getIndexedState(item);
       indexingState = FULLTEXT_INDEX_STATE_MAP[stateNum] ?? "unavailable";
-    } catch {
-      // ignore
+    } catch (err) {
+      ztoolkit.log("LLM: Attachment indexing state check failed", err);
     }
     return { attachmentId: params.attachmentId, indexingState, triggered: true };
   }

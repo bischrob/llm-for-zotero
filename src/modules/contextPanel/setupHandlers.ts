@@ -40,7 +40,6 @@ import {
   selectedPaperContextCache,
   selectedOtherRefContextCache,
   paperContextModeOverrides,
-  paperContentSourceOverrides,
   selectedPaperPreviewExpandedCache,
   pinnedSelectedTextKeys,
   pinnedImageKeys,
@@ -140,18 +139,17 @@ import {
   getSelectedTextContextEntries,
   getSelectedTextContexts,
   getSelectedTextExpandedIndex,
-  includeSelectedTextFromReader,
   isNoteContextExpanded,
   refreshNoteChipPreview,
   refreshActiveNoteChipPreview,
   resolveContextSourceItem,
   setNoteContextExpanded,
   setSelectedTextContextEntries,
-  setSelectedTextContexts,
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
 import {
   flashPageInLivePdfReader,
+  resolveCurrentSelectionPageLocationFromReader,
   scrollToExactQuoteInReader,
 } from "./livePdfSelectionLocator";
 import {
@@ -159,6 +157,30 @@ import {
   resolvePaperContextRefFromItem,
 } from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
+import {
+  getPaperModeOverride,
+  setPaperModeOverride,
+  clearPaperModeOverrides,
+  isPaperContextFullTextMode,
+  getPaperContentSourceOverride,
+  setPaperContentSourceOverride,
+  clearPaperContentSourceOverrides,
+  getNextContentSourceMode,
+  clearSelectedPaperState,
+  clearAllRefContextState,
+} from "./contexts/paperContextState";
+import {
+  clearSelectedImageState as clearSelectedImageState_,
+  retainPinnedImageState as retainPinnedImageState_,
+} from "./contexts/imageContextState";
+import {
+  clearSelectedFileState as clearSelectedFileState_,
+  retainPinnedFileState as retainPinnedFileState_,
+} from "./contexts/fileContextState";
+import {
+  clearSelectedTextState as clearSelectedTextState_,
+  retainPinnedTextState as retainPinnedTextState_,
+} from "./contexts/textContextState";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import { captureCurrentPdfPage } from "./pdfPageCapture";
 import {
@@ -239,7 +261,6 @@ import type {
 import {
   createGlobalPortalItem,
   createPaperPortalItem,
-  getPaperPortalBaseItemID,
   isGlobalPortalItem,
   resolveActiveNoteSession,
   resolveDisplayConversationKind,
@@ -282,7 +303,6 @@ import {
   resolveAttachmentTitle,
 } from "./setupHandlers/controllers/composeContextController";
 import {
-  clearPinnedContextOwner,
   isPinnedFile,
   isPinnedImage,
   prunePinnedFileKeys,
@@ -290,9 +310,6 @@ import {
   removePinnedFile,
   removePinnedImage,
   removePinnedSelectedText,
-  retainPinnedFiles,
-  retainPinnedImages,
-  retainPinnedSelectedTextContexts,
   togglePinnedFile,
   togglePinnedImage,
   togglePinnedSelectedText,
@@ -1437,18 +1454,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
   });
 
-  const clearSelectedImageState = (itemId: number) => {
-    selectedImageCache.delete(itemId);
-    selectedImagePreviewExpandedCache.delete(itemId);
-    selectedImagePreviewActiveIndexCache.delete(itemId);
-    clearPinnedContextOwner(pinnedImageKeys, itemId);
-  };
+  const clearSelectedImageState = (itemId: number) =>
+    clearSelectedImageState_(pinnedImageKeys, itemId);
 
-  const clearSelectedFileState = (itemId: number) => {
-    selectedFileAttachmentCache.delete(itemId);
-    selectedFilePreviewExpandedCache.delete(itemId);
-    clearPinnedContextOwner(pinnedFileKeys, itemId);
-  };
+  const clearSelectedFileState = (itemId: number) =>
+    clearSelectedFileState_(pinnedFileKeys, itemId);
 
   const hasUserTurnsForCurrentConversation = (): boolean => {
     if (!item) return false;
@@ -1456,29 +1466,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     return history.some((message) => message.role === "user");
   };
 
-  const getPaperModeOverride = (
-    itemId: number,
-    paperContext: PaperContextRef,
-  ): PaperContextSendMode | null => {
-    return paperContextModeOverrides.get(itemId)?.get(buildPaperKey(paperContext)) || null;
-  };
-
-  const setPaperModeOverride = (
-    itemId: number,
-    paperContext: PaperContextRef,
-    mode: PaperContextSendMode,
-  ) => {
-    let overrides = paperContextModeOverrides.get(itemId);
-    if (!overrides) {
-      overrides = new Map<string, PaperContextSendMode>();
-      paperContextModeOverrides.set(itemId, overrides);
-    }
-    overrides.set(buildPaperKey(paperContext), mode);
-  };
-
-  const clearPaperModeOverrides = (itemId: number) => {
-    paperContextModeOverrides.delete(itemId);
-  };
+  // getPaperModeOverride, setPaperModeOverride, clearPaperModeOverrides
+  // → imported from ./contexts/paperContextState
 
   const consumePaperModeState = (itemId: number) => {
     if (!item || item.id !== itemId) {
@@ -1487,49 +1476,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     }
     const fullTextPaperContexts = getEffectiveFullTextPaperContexts(item);
     if (!fullTextPaperContexts.length) return;
-    let overrides = paperContextModeOverrides.get(itemId);
     for (const paperContext of fullTextPaperContexts) {
       if (resolvePaperContextNextSendMode(itemId, paperContext) !== "full-next") {
         continue;
       }
-      if (!overrides) {
-        overrides = new Map<string, PaperContextSendMode>();
-        paperContextModeOverrides.set(itemId, overrides);
-      }
-      overrides.set(buildPaperKey(paperContext), "retrieval");
+      setPaperModeOverride(itemId, paperContext, "retrieval");
     }
   };
 
-  const isPaperContextFullTextMode = (
-    mode: PaperContextSendMode | null | undefined,
-  ): boolean => {
-    return mode === "full-next" || mode === "full-sticky";
-  };
-
-  // ── Content source mode helpers ──────────────────────────────────────────
-  const getPaperContentSourceOverride = (
-    itemId: number,
-    paperContext: PaperContextRef,
-  ): PaperContentSourceMode | null => {
-    return paperContentSourceOverrides.get(itemId)?.get(buildPaperKey(paperContext)) || null;
-  };
-
-  const setPaperContentSourceOverride = (
-    itemId: number,
-    paperContext: PaperContextRef,
-    mode: PaperContentSourceMode,
-  ) => {
-    let overrides = paperContentSourceOverrides.get(itemId);
-    if (!overrides) {
-      overrides = new Map<string, PaperContentSourceMode>();
-      paperContentSourceOverrides.set(itemId, overrides);
-    }
-    overrides.set(buildPaperKey(paperContext), mode);
-  };
-
-  const clearPaperContentSourceOverrides = (itemId: number) => {
-    paperContentSourceOverrides.delete(itemId);
-  };
+  // isPaperContextFullTextMode, getPaperContentSourceOverride,
+  // setPaperContentSourceOverride, clearPaperContentSourceOverrides
+  // → imported from ./contexts/paperContextState
 
   const resolvePaperContentSourceMode = (
     itemId: number,
@@ -1539,18 +1496,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     return explicit || (isPaperContextMineru(paperContext) ? "mineru" : "text");
   };
 
-  const getNextContentSourceMode = (
-    current: PaperContentSourceMode,
-    hasMinerU: boolean,
-  ): PaperContentSourceMode => {
-    if (hasMinerU) {
-      // MinerU available: toggle mineru <-> pdf
-      return current === "pdf" ? "mineru" : "pdf";
-    }
-    // No MinerU: toggle text <-> pdf
-    return current === "pdf" ? "text" : "pdf";
-  };
-  // ────────────────────────────────────────────────────────────────────────
+  // getNextContentSourceMode → imported from ./contexts/paperContextState
 
   // Lightweight sync cache: once checkAndApplyMineruChipStyle confirms MinerU
   // exists on disk, the contextItemId is added here so isPaperContextMineru
@@ -1643,25 +1589,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     );
   };
 
-  const clearSelectedPaperState = (itemId: number) => {
-    selectedPaperContextCache.delete(itemId);
-    selectedPaperPreviewExpandedCache.delete(itemId);
-    clearPaperModeOverrides(itemId);
-    // Note: content source overrides are NOT cleared here because auto-loaded
-    // papers may still have overrides even when selectedPaperContextCache is empty.
-    // They are cleared when the paper is truly removed from all contexts.
-  };
-  const clearAllRefContextState = (itemId: number) => {
-    clearSelectedPaperState(itemId);
-    selectedOtherRefContextCache.delete(itemId);
-  };
+  // clearSelectedPaperState, clearAllRefContextState
+  // → imported from ./contexts/paperContextState
 
-  const clearSelectedTextState = (itemId: number) => {
-    setSelectedTextContexts(itemId, []);
-    setSelectedTextExpandedIndex(itemId, null);
-    setNoteContextExpanded(itemId, null);
-    clearPinnedContextOwner(pinnedSelectedTextKeys, itemId);
-  };
+  const clearSelectedTextState = (itemId: number) =>
+    clearSelectedTextState_(pinnedSelectedTextKeys, itemId);
   const setDraftInputForConversation = (
     conversationKey: number,
     value: string,
@@ -1691,44 +1623,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const clearDraftInputState = (itemId: number) => {
     draftInputCache.delete(itemId);
   };
-  const retainPinnedImageState = (itemId: number) => {
-    const retained = retainPinnedImages(
-      pinnedImageKeys,
-      itemId,
-      selectedImageCache.get(itemId) || [],
-    );
-    if (retained.length) {
-      selectedImageCache.set(itemId, retained);
-      const currentActiveIndex =
-        selectedImagePreviewActiveIndexCache.get(itemId);
-      const normalizedActiveIndex =
-        typeof currentActiveIndex === "number" &&
-        Number.isFinite(currentActiveIndex)
-          ? Math.max(
-              0,
-              Math.min(retained.length - 1, Math.floor(currentActiveIndex)),
-            )
-          : 0;
-      selectedImagePreviewActiveIndexCache.set(itemId, normalizedActiveIndex);
-      return;
-    }
-    selectedImageCache.delete(itemId);
-    selectedImagePreviewExpandedCache.delete(itemId);
-    selectedImagePreviewActiveIndexCache.delete(itemId);
-  };
-  const retainPinnedFileState = (itemId: number) => {
-    const retained = retainPinnedFiles(
-      pinnedFileKeys,
-      itemId,
-      selectedFileAttachmentCache.get(itemId) || [],
-    );
-    if (retained.length) {
-      selectedFileAttachmentCache.set(itemId, retained);
-      return;
-    }
-    selectedFileAttachmentCache.delete(itemId);
-    selectedFilePreviewExpandedCache.delete(itemId);
-  };
+  const retainPinnedImageState = (itemId: number) =>
+    retainPinnedImageState_(pinnedImageKeys, itemId);
+  const retainPinnedFileState = (itemId: number) =>
+    retainPinnedFileState_(pinnedFileKeys, itemId);
   const retainPaperState = (itemId: number) => {
     const retained = normalizePaperContextEntries(
       selectedPaperContextCache.get(itemId) || [],
@@ -1739,23 +1637,22 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       selectedPaperContextCache.delete(itemId);
     }
     // Retain other ref contexts across sends (they persist like paper contexts).
+    // Prune orphaned mode overrides for papers that are no longer selected.
     const autoLoadedPaperContext =
       item && item.id === itemId ? resolveAutoLoadedPaperContext() : null;
-    const overrides = paperContextModeOverrides.get(itemId);
-    if (overrides?.size) {
-      const validKeys = new Set(
-        retained.map((paperContext) => buildPaperKey(paperContext)),
-      );
-      if (autoLoadedPaperContext) {
-        validKeys.add(buildPaperKey(autoLoadedPaperContext));
-      }
-      for (const key of Array.from(overrides.keys())) {
-        if (!validKeys.has(key)) {
-          overrides.delete(key);
+    const validPaperKeys = new Set(
+      retained.map((paperContext) => buildPaperKey(paperContext)),
+    );
+    if (autoLoadedPaperContext) {
+      validPaperKeys.add(buildPaperKey(autoLoadedPaperContext));
+    }
+    const prefix = `${itemId}:`;
+    for (const key of Array.from(paperContextModeOverrides.keys())) {
+      if (key.startsWith(prefix)) {
+        const paperKey = key.slice(prefix.length);
+        if (!validPaperKeys.has(paperKey)) {
+          paperContextModeOverrides.delete(key);
         }
-      }
-      if (!overrides.size) {
-        paperContextModeOverrides.delete(itemId);
       }
     }
     if (retained.length) {
@@ -1765,16 +1662,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       selectedPaperPreviewExpandedCache.delete(itemId);
     }
   };
-  const retainPinnedTextState = (itemId: number) => {
-    const retained = retainPinnedSelectedTextContexts(
-      pinnedSelectedTextKeys,
-      itemId,
-      getSelectedTextContextEntries(itemId),
-    );
-    setSelectedTextContextEntries(itemId, retained);
-    setSelectedTextExpandedIndex(itemId, null);
-    setNoteContextExpanded(itemId, null);
-  };
+  const retainPinnedTextState = (itemId: number) =>
+    retainPinnedTextState_(pinnedSelectedTextKeys, itemId);
   const clearTransientComposeStateForItem = (itemId: number) => {
     clearDraftInputState(itemId);
     clearSelectedImageState(itemId);
@@ -7982,7 +7871,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             // Read the persisted PNG and convert to data URL for the image pipeline
             const bytes = await readAttachmentBytes(page.storedPath);
             if (bytes.byteLength > 0) {
-              const base64 = btoa(String.fromCharCode(...bytes));
+              // Encode in chunks to avoid "too many function arguments" with large images
+              let binaryStr = "";
+              const chunkSize = 0x8000;
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                binaryStr += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + chunkSize)));
+              }
+              const base64 = btoa(binaryStr);
               dataUrls.push(`data:image/png;base64,${base64}`);
             }
           }
@@ -7992,7 +7887,26 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
       return dataUrls;
     },
-    getModelPdfSupport: (modelName, protocol, authMode) => getModelPdfSupport(modelName, protocol, authMode),
+    getModelPdfSupport: (modelName, protocol, authMode, apiBase) => getModelPdfSupport(modelName, protocol, authMode, apiBase),
+    uploadPdfForProvider: async (params) => {
+      const { detectPdfUploadProvider, uploadPdfForProvider } = await import("../../utils/pdfUploadPreprocessor");
+      const provider = detectPdfUploadProvider(params.apiBase);
+      return uploadPdfForProvider({ provider, ...params });
+    },
+    resolvePdfBytes: async (pc) => {
+      const attachment = Zotero.Items.get(pc.contextItemId);
+      if (!attachment?.isAttachment?.() || attachment.attachmentContentType !== "application/pdf") {
+        throw new Error("Not a PDF attachment");
+      }
+      const filePath = await (async () => {
+        const asyncPath = await (attachment as unknown as { getFilePathAsync?: () => Promise<string | false> }).getFilePathAsync?.();
+        if (asyncPath) return asyncPath as string;
+        if (typeof (attachment as { getFilePath?: () => string | undefined }).getFilePath === "function") return (attachment as { getFilePath: () => string | undefined }).getFilePath();
+        return (attachment as unknown as { attachmentPath?: string }).attachmentPath;
+      })();
+      if (!filePath) throw new Error("Could not locate PDF file");
+      return readAttachmentBytes(filePath);
+    },
     getSelectedFiles: (itemId) => selectedFileAttachmentCache.get(itemId) || [],
     getSelectedImages: (itemId) => selectedImageCache.get(itemId) || [],
     resolvePromptText,
@@ -8208,27 +8122,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         consumePaperModeState(currentItem.id);
         retainPaperState(currentItem.id);
         updatePaperPreviewPreservingScroll();
-        void editUserTurnAndRetry(
+        void editUserTurnAndRetry({
           body,
-          currentItem,
-          editTarget.userTimestamp,
-          editTarget.assistantTimestamp,
+          item: currentItem,
+          userTimestamp: editTarget.userTimestamp,
+          assistantTimestamp: editTarget.assistantTimestamp,
           newText,
           selectedTexts,
           selectedTextSources,
           selectedTextPaperContexts,
           selectedTextNoteContexts,
-          images,
-          selectedPaperContexts,
+          screenshotImages: images,
+          paperContexts: selectedPaperContexts,
           fullTextPaperContexts,
-          selectedFiles,
+          attachments: selectedFiles,
           targetRuntimeMode,
-          selectedProfile?.model,
-          selectedProfile?.apiBase,
-          selectedProfile?.apiKey,
-          selectedReasoning,
-          advancedParams,
-        );
+          model: selectedProfile?.model,
+          apiBase: selectedProfile?.apiBase,
+          apiKey: selectedProfile?.apiKey,
+          reasoning: selectedReasoning,
+          advanced: advancedParams,
+        });
       } else {
         // Nothing to submit — refresh the chat to remove the stale inline
         // edit widget (the "Editing" header div) that cleanup left in chatBox.
@@ -8506,66 +8420,107 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     ).__llmFontScaleShortcut = true;
   }
 
-  if (selectTextBtn) {
+  // "Add Text" button — mirrors the reader popup "Add Text" path.
+  // Reads the conversation key directly from the panel's own DOM data
+  // attributes, so it always targets the correct conversation regardless
+  // of which tab was active when setupHandlers last ran.
+  {
+    const bodyDelegation = body as Element & {
+      __llmAddTextPointerDown?: EventListener;
+      __llmAddTextMouseDown?: EventListener;
+      __llmAddTextClick?: EventListener;
+    };
+    if (bodyDelegation.__llmAddTextPointerDown) {
+      body.removeEventListener("pointerdown", bodyDelegation.__llmAddTextPointerDown, true);
+    }
+    if (bodyDelegation.__llmAddTextMouseDown) {
+      body.removeEventListener("mousedown", bodyDelegation.__llmAddTextMouseDown, true);
+    }
+    if (bodyDelegation.__llmAddTextClick) {
+      body.removeEventListener("click", bodyDelegation.__llmAddTextClick, true);
+    }
+
     let pendingSelectedText = "";
-    const cacheSelectionBeforeFocusShift = () => {
-      if (!item) return;
+
+    const cacheSelectionBeforeFocusShift = (e: Event) => {
+      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
+      const currentItem = activeContextPanels.get(body)?.() ?? item;
+      if (!currentItem) return;
       pendingSelectedText = getActiveReaderSelectionText(
         body.ownerDocument as Document,
-        item,
+        currentItem,
       );
     };
-    selectTextBtn.addEventListener(
-      "pointerdown",
-      cacheSelectionBeforeFocusShift,
-    );
-    selectTextBtn.addEventListener("mousedown", cacheSelectionBeforeFocusShift);
-    selectTextBtn.addEventListener("click", async (e: Event) => {
+
+    const addTextClickHandler = async (e: Event) => {
+      if (!(e.target as Element)?.closest?.("#llm-select-text")) return;
       e.preventDefault();
       e.stopPropagation();
-      if (!item) return;
-      const selectedText = pendingSelectedText;
+
+      // Derive conversation key from the current item (updated by onRender
+      // on every tab switch) — not from panel DOM which may be stale.
+      const currentItem = activeContextPanels.get(body)?.() ?? item;
+      const root = body.querySelector("#llm-main") as HTMLDivElement | null;
+      const conversationKind = root?.dataset?.conversationKind || "";
+      const isGlobal = conversationKind === "global";
+      const conversationKey = currentItem
+        ? getConversationKey(currentItem)
+        : Number(root?.dataset?.itemId || 0);
+
+      if (!conversationKey) {
+        ztoolkit.log("LLM addText: no conversationKey");
+        return;
+      }
+
+      // Resolve selected text (cached on pointerdown, fallback on click)
+      let selectedText = pendingSelectedText;
       pendingSelectedText = "";
-      const activeReaderAttachment = getActiveContextAttachmentFromTabs();
-      const resolvedPaperContext = resolvePaperContextRefFromAttachment(
-        activeReaderAttachment,
-      );
-      const textContextKey = getTextContextConversationKey();
-      if (!textContextKey) return;
-      if (!isGlobalMode()) {
-        const activeBasePaperItemID = Number(
-          resolveCurrentPaperBaseItem()?.id ||
-            getPaperPortalBaseItemID(item) ||
-            0,
-        );
-        const paperMismatch =
-          !resolvedPaperContext ||
-          activeBasePaperItemID <= 0 ||
-          resolvedPaperContext.itemId !== activeBasePaperItemID;
-        if (paperMismatch) {
-          if (status) {
-            setStatus(
-              status,
-              t("Paper mode only accepts text from this paper"),
-              "error",
-            );
-          }
-          return;
+      if (!selectedText) {
+        const currentItem = activeContextPanels.get(body)?.() ?? item;
+        if (currentItem) {
+          selectedText = getActiveReaderSelectionText(
+            body.ownerDocument as Document,
+            currentItem,
+          );
         }
       }
-      const added = await includeSelectedTextFromReader(
-        body,
-        item,
+      if (!selectedText) {
+        ztoolkit.log("LLM addText: no text selected");
+        return;
+      }
+
+      // Global mode: attribute text to source paper
+      const readerAttachment = getActiveContextAttachmentFromTabs();
+      const readerPaperContext = resolvePaperContextRefFromAttachment(readerAttachment);
+      const paperContext = isGlobal ? readerPaperContext : null;
+
+      // Resolve page location for jump-to-source
+      const reader = getActiveReaderForSelectedTab();
+      const selectedTextLocation =
+        await resolveCurrentSelectionPageLocationFromReader(
+          reader,
+          selectedText,
+        );
+
+      const added = appendSelectedTextContextForItem(
+        conversationKey,
         selectedText,
-        {
-          targetItemId: textContextKey,
-          paperContext: isGlobalMode() ? resolvedPaperContext : null,
-        },
+        "pdf",
+        paperContext,
+        selectedTextLocation,
       );
       if (added) {
-        updateSelectedTextPreviewPreservingScroll();
+        applySelectedTextPreview(body, conversationKey);
       }
-    });
+    };
+
+    bodyDelegation.__llmAddTextPointerDown = cacheSelectionBeforeFocusShift as EventListener;
+    bodyDelegation.__llmAddTextMouseDown = cacheSelectionBeforeFocusShift as EventListener;
+    bodyDelegation.__llmAddTextClick = addTextClickHandler as EventListener;
+
+    body.addEventListener("pointerdown", cacheSelectionBeforeFocusShift as EventListener, true);
+    body.addEventListener("mousedown", cacheSelectionBeforeFocusShift as EventListener, true);
+    body.addEventListener("click", addTextClickHandler as EventListener, true);
   }
 
   // Screenshot button
@@ -9491,7 +9446,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
       const removedPaper = selectedPapers[index];
       if (removedPaper) {
-        paperContextModeOverrides.get(item.id)?.delete(buildPaperKey(removedPaper));
+        paperContextModeOverrides.delete(`${item.id}:${buildPaperKey(removedPaper)}`);
       }
       const nextPapers = selectedPapers.filter((_, i) => i !== index);
       if (nextPapers.length) {
@@ -9642,7 +9597,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (nextSource === "pdf") {
         const selectedProfile = getSelectedProfile();
         const modelName = (selectedProfile?.model || getSelectedModelInfo().currentModel || "").trim();
-        const pdfSupport = getModelPdfSupport(modelName, selectedProfile?.providerProtocol, selectedProfile?.authMode);
+        const pdfSupport = getModelPdfSupport(modelName, selectedProfile?.providerProtocol, selectedProfile?.authMode, selectedProfile?.apiBase);
         if (pdfSupport === "none") {
           if (status) {
             setStatus(status, t("PDF mode is not available for this model. Use Text or MD mode."), "error");

@@ -45,7 +45,7 @@ import {
 import { normalizeSelectedText, setStatus } from "./textUtils";
 import { buildUI, syncGlobalLockVisibility } from "./buildUI";
 import { setupHandlers } from "./setupHandlers";
-import { ensureConversationLoaded } from "./chat";
+import { ensureConversationLoaded, getConversationKey } from "./chat";
 import { renderShortcuts } from "./shortcuts";
 import { refreshChat } from "./chat";
 import {
@@ -122,25 +122,51 @@ export function registerReaderContextPanel() {
     },
     onRender: ({ body, item }) => {
       syncGlobalLockVisibility(body);
-      // If a global lock is active but the panel is showing paper chat,
-      // the panel state is stale (e.g. tab was already open before auto-lock).
-      // Schedule a full async re-render so the panel switches to the locked session.
       try {
+        const panelRoot = body.querySelector("#llm-main") as HTMLElement | null;
+        // Treat missing panel root as needing a full render — the body may
+        // belong to a tab that onAsyncRender never fired for.
+        const needsFullRender = !activeContextPanels.has(body) || !panelRoot;
+
+        // Also check if a global lock requires switching to open chat
         const libraryID = resolveActiveLibraryID() || 0;
         const lockedKey = libraryID > 0 ? getLockedGlobalConversationKey(libraryID) : null;
-        const panelRoot = body.querySelector("#llm-main") as HTMLElement | null;
         const currentKind = panelRoot?.dataset?.conversationKind;
-        if (lockedKey !== null && currentKind === "paper") {
-          const resolvedState = resolveInitialPanelItemState(item);
-          // Micro-task so onRender returns synchronously
+        const lockStale = lockedKey !== null && currentKind === "paper";
+
+        // Detect if the active item has changed (e.g. user switched reader tabs).
+        // If so, the panel must fully re-render to switch conversations.
+        const resolvedState = resolveInitialPanelItemState(item);
+        const storedItemKey = panelRoot?.dataset?.itemId;
+        const newItemKey = resolvedState.item
+          ? String(getConversationKey(resolvedState.item))
+          : "0";
+        const itemChanged =
+          !needsFullRender &&
+          storedItemKey !== undefined &&
+          storedItemKey !== newItemKey;
+
+        if (needsFullRender || lockStale || itemChanged) {
+          // Build UI synchronously so panel data attributes (basePaperItemId,
+          // conversationKind, etc.) are immediately correct.  The reader popup
+          // "Add Text" path reads these attributes to decide paper-mismatch —
+          // if we defer buildUI, the stale panel from the previous tab wins.
+          buildUI(body, resolvedState.item);
+          activeContextPanels.set(body, () => resolvedState.item);
+          // Defer conversation loading, handler setup, and chat rendering
           void (async () => {
             try {
-              buildUI(body, resolvedState.item);
               if (resolvedState.item) await ensureConversationLoaded(resolvedState.item);
               setupHandlers(body, item);
               refreshChat(body, resolvedState.item);
-            } catch { /* ignore */ }
+            } catch (err) {
+              ztoolkit.log("LLM: onRender async setup failed", err);
+            }
           })();
+        } else {
+          // Same item — keep item reference current so delegated handlers
+          // (e.g. Add Text) always resolve the active item.
+          activeContextPanels.set(body, () => resolvedState.item);
         }
       } catch { /* ignore */ }
     },
@@ -452,7 +478,9 @@ export function registerReaderSelectionTracking() {
             if (state.visible && state.matchesLockedGlobal) return 4.5;
             if (state.visible && state.matchesReaderPaper) return 4;
             if (state.visible) return 3;
+            if (state.matchesReaderPaper) return 2.5;
             if (state.sameDoc) return 2;
+            if (state.matchesLockedGlobal) return 1.5;
             if (state.hasActiveFocus) return 1;
             return 0;
           };
@@ -466,33 +494,35 @@ export function registerReaderSelectionTracking() {
             }
           }
 
-          const panelRoot = bestState.root;
           const panelBody = bestState.body;
-          const conversationKey = bestState.conversationKey as number;
+
+          // Derive conversation key directly from the reader's paper —
+          // no dependency on panel scoring or stale panel data attributes.
           const isGlobalConversation = bestState.conversationKind === "global";
-          if (!isGlobalConversation) {
-            const panelBasePaperItemID = Number(bestState.basePaperItemID || 0);
-            const paperMismatch =
-              !readerPaperContext ||
-              panelBasePaperItemID <= 0 ||
-              readerPaperContext.itemId !== panelBasePaperItemID;
-            if (paperMismatch) {
-              const status = panelBody.querySelector(
-                "#llm-status",
-              ) as HTMLElement | null;
-              if (status) {
-                setStatus(
-                  status,
-                  "Paper mode only accepts text from this paper",
-                  "error",
-                );
-              }
-              return;
+          let conversationKey: number;
+          let selectedPaperContext: typeof readerPaperContext | null;
+          if (isGlobalConversation) {
+            // Global mode: use the panel's global conversation key
+            conversationKey = bestState.conversationKey as number;
+            selectedPaperContext = readerPaperContext;
+          } else {
+            // Paper mode: resolve the conversation key from the reader's
+            // paper item via resolveInitialPanelItemState + getConversationKey.
+            // This correctly handles portal keys (multi-conversation papers).
+            const readerItem = readerPaperItemID > 0
+              ? Zotero.Items.get(readerPaperItemID) || null
+              : null;
+            if (readerItem) {
+              const resolved = resolveInitialPanelItemState(readerItem);
+              conversationKey = resolved.item
+                ? getConversationKey(resolved.item)
+                : readerPaperItemID;
+            } else {
+              conversationKey = bestState.conversationKey as number;
             }
+            selectedPaperContext = null;
           }
-          const selectedPaperContext = isGlobalConversation
-            ? readerPaperContext
-            : null;
+
           const selectedTextLocation =
             await resolveCurrentSelectionPageLocationFromReader(
               event.reader as any,
@@ -505,6 +535,8 @@ export function registerReaderSelectionTracking() {
             selectedPaperContext,
             selectedTextLocation,
           );
+
+          // Refresh any panel whose conversation key matches
           let refreshedPanels = 0;
           for (const [
             activeBody,
@@ -531,7 +563,18 @@ export function registerReaderSelectionTracking() {
             refreshedPanels += 1;
           }
           if (!refreshedPanels) {
-            applySelectedTextPreview(panelBody, conversationKey);
+            // Search all registered panel bodies for a matching conversation
+            for (const [activeBody] of activeContextPanels) {
+              if (!(activeBody as Element).isConnected) continue;
+              const activeRoot = (activeBody as Element).querySelector(
+                "#llm-main",
+              ) as HTMLDivElement | null;
+              if (Number(activeRoot?.dataset?.itemId || 0) === conversationKey) {
+                applySelectedTextPreview(activeBody as Element, conversationKey);
+                refreshedPanels += 1;
+                break;
+              }
+            }
           }
           const status = panelBody.querySelector(
             "#llm-status",

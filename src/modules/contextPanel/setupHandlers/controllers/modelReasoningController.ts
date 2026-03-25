@@ -9,12 +9,13 @@ export function isScreenshotUnsupportedModel(modelName: string): boolean {
   return /^deepseek-(?:chat|reasoner)(?:$|[.-])/.test(normalized);
 }
 
-export type ModelPdfSupport = "native" | "vision" | "none";
+export type ModelPdfSupport = "native" | "upload" | "vision" | "none";
 
 export function getModelPdfSupport(
   modelName: string,
   providerProtocol?: string,
   authMode?: string,
+  apiBase?: string,
 ): ModelPdfSupport {
   const m = modelName.trim().toLowerCase();
   // Text-only models: no PDF, no vision
@@ -22,7 +23,11 @@ export function getModelPdfSupport(
   if (/reasoner|text-only|embedding/.test(m)) return "none";
   // Copilot auth: no file upload, unreliable image payloads — disable PDF mode
   if (authMode === "copilot_auth") return "none";
-  // Only first-party APIs support native PDF file upload
+  // Providers with server-side file upload + extraction (Qwen DashScope, Kimi Moonshot)
+  const base = (apiBase || "").toLowerCase();
+  if (base.includes("dashscope.aliyuncs.com") || base.includes("dashscope-intl.aliyuncs.com")) return "upload";
+  if (base.includes("api.moonshot.cn") || base.includes("api.moonshot.ai")) return "upload";
+  // Only first-party APIs support native PDF file upload (binary in message)
   const proto = (providerProtocol || "").trim().toLowerCase();
   if (proto === "anthropic_messages") return "native";
   if (proto === "gemini_native") return "native";

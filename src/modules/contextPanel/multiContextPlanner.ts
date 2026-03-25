@@ -99,8 +99,9 @@ async function rewriteQueryForRetrieval(params: {
   model: string;
   apiBase?: string;
   apiKey?: string;
+  providerProtocol?: import("../../utils/providerProtocol").ProviderProtocol;
 }): Promise<string> {
-  const { question, paperTitles, model, apiBase, apiKey } = params;
+  const { question, paperTitles, model, apiBase, apiKey, providerProtocol } = params;
   if (!question.trim()) return question;
 
   try {
@@ -120,6 +121,7 @@ async function rewriteQueryForRetrieval(params: {
       model,
       apiBase,
       apiKey,
+      providerProtocol,
       maxTokens: Math.max(100, estimateTextTokens(question) * 3),
       temperature: 0,
     });
@@ -736,6 +738,7 @@ export async function resolveMultiContextPlan(params: {
   advanced?: AdvancedModelParams;
   apiBase?: string;
   apiKey?: string;
+  providerProtocol?: import("../../utils/providerProtocol").ProviderProtocol;
   systemPrompt?: string;
 }): Promise<MultiContextPlan> {
   const papers = await resolvePlannerPaperEntries({
@@ -774,6 +777,7 @@ export async function resolveMultiContextPlan(params: {
     model: params.model,
     apiBase: params.apiBase,
     apiKey: params.apiKey,
+    providerProtocol: params.providerProtocol,
   });
 
   if (!papers.length) {

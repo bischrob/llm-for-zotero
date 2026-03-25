@@ -28,6 +28,7 @@ import {
   parseDataUrl,
   readFileRefAsBase64,
 } from "./shared";
+import { resolveContentParts } from "./adapterUtils";
 
 type AnthropicContentBlock = {
   type: string;
@@ -87,49 +88,15 @@ function normalizeAnthropicContentBlock(
 async function buildAnthropicParts(
   message: AgentModelMessage,
 ): Promise<AnthropicContentBlock[]> {
-  if (typeof message.content === "string") {
-    return [{ type: "text", text: message.content }];
-  }
-  const blocks: AnthropicContentBlock[] = [];
-  for (const part of message.content) {
-    if (part.type === "text") {
-      blocks.push({ type: "text", text: part.text });
-      continue;
+  const resolved = await resolveContentParts(message);
+  return resolved.map((part): AnthropicContentBlock => {
+    switch (part.type) {
+      case "text": return { type: "text", text: part.text };
+      case "image": return { type: "image", source: { type: "base64", media_type: part.mimeType, data: part.base64 } };
+      case "pdf": return { type: "document", source: { type: "base64", media_type: "application/pdf", data: part.base64 } };
+      case "file_placeholder": return { type: "text", text: `[Prepared file: ${part.name}]` };
     }
-    if (part.type === "image_url") {
-      const parsed = parseDataUrl(part.image_url.url);
-      if (parsed) {
-        blocks.push({
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: parsed.mimeType,
-            data: parsed.data,
-          },
-        });
-      } else {
-        blocks.push({ type: "text", text: "[image]" });
-      }
-      continue;
-    }
-    if (part.file_ref.mimeType === "application/pdf") {
-      const data = await readFileRefAsBase64(part.file_ref.storedPath);
-      blocks.push({
-        type: "document",
-        source: {
-          type: "base64",
-          media_type: "application/pdf",
-          data,
-        },
-      });
-    } else {
-      blocks.push({
-        type: "text",
-        text: `[Prepared file: ${part.file_ref.name}]`,
-      });
-    }
-  }
-  return blocks.length ? blocks : [{ type: "text", text: "" }];
+  });
 }
 
 async function buildInitialAnthropicMessages(messages: AgentModelMessage[]): Promise<{

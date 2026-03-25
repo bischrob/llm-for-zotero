@@ -1219,6 +1219,7 @@ async function buildContextPlanForRequest(params: {
   history: ChatMessage[];
   effectiveRequestConfig: EffectiveRequestConfig;
   pdfModePaperKeys?: Set<string>;
+  pdfUploadSystemMessages?: string[];
   setStatusSafely: (
     text: string,
     kind: Parameters<typeof setStatus>[2],
@@ -1268,6 +1269,7 @@ async function buildContextPlanForRequest(params: {
     advanced: params.effectiveRequestConfig.advanced,
     apiBase: params.effectiveRequestConfig.apiBase,
     apiKey: params.effectiveRequestConfig.apiKey,
+    providerProtocol: params.effectiveRequestConfig.providerProtocol,
     systemPrompt,
   });
 
@@ -1294,7 +1296,12 @@ async function buildContextPlanForRequest(params: {
     params.item,
   ).trim();
   const planContext = sanitizeText(plan.contextText || "").trim();
-  const combinedContext = [noteContext, planContext].filter(Boolean).join("\n\n");
+  // Include provider-uploaded PDF content (Qwen fileid://, Kimi extracted text)
+  const uploadedPdfContext = (params.pdfUploadSystemMessages || [])
+    .map((msg) => sanitizeText(msg).trim())
+    .filter(Boolean)
+    .join("\n\n");
+  const combinedContext = [noteContext, planContext, uploadedPdfContext].filter(Boolean).join("\n\n");
 
   // Extract MinerU figure images from the context (if applicable)
   let mineruImages: string[] = [];
@@ -1306,8 +1313,8 @@ async function buildContextPlanForRequest(params: {
           contextText: planContext,
           attachmentId: activeContextItem.id,
         });
-      } catch {
-        /* ignore — figures are best-effort */
+      } catch (err) {
+        ztoolkit.log("LLM: MinerU figure resolution failed (best-effort)", err);
       }
     }
   }
@@ -1767,39 +1774,27 @@ function syncComposeContextForInlineEdit(
   } else {
     selectedPaperContextCache.delete(item.id);
   }
-  const nextOverrides = new Map<string, PaperContextSendMode>();
-  for (const paperContext of fullTextPaperContexts) {
-    nextOverrides.set(buildPaperKey(paperContext), "full-next");
+  // Clear existing mode overrides for this item, then set full-next for each full-text paper
+  const modePrefix = `${item.id}:`;
+  for (const key of Array.from(paperContextModeOverrides.keys())) {
+    if (key.startsWith(modePrefix)) paperContextModeOverrides.delete(key);
   }
-  if (nextOverrides.size) {
-    paperContextModeOverrides.set(item.id, nextOverrides);
-  } else {
-    paperContextModeOverrides.delete(item.id);
+  for (const paperContext of fullTextPaperContexts) {
+    paperContextModeOverrides.set(`${item.id}:${buildPaperKey(paperContext)}`, "full-next");
   }
 
   activeContextPanelStateSync.get(body)?.();
 }
 
 export async function editLatestUserMessageAndRetry(
-  body: Element,
-  item: Zotero.Item,
-  displayQuestion: string,
-  selectedTexts?: string[],
-  selectedTextSources?: SelectedTextSource[],
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[],
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
-  screenshotImages?: string[],
-  paperContexts?: PaperContextRef[],
-  fullTextPaperContexts?: PaperContextRef[],
-  attachments?: ChatAttachment[],
-  targetRuntimeMode?: ChatRuntimeMode,
-  expected?: EditLatestTurnMarker,
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
+  opts: import("./types").EditRetryOptions,
 ): Promise<EditLatestTurnResult> {
+  const {
+    body, item, displayQuestion, selectedTexts, selectedTextSources,
+    selectedTextPaperContexts, selectedTextNoteContexts, screenshotImages,
+    paperContexts, fullTextPaperContexts, attachments, targetRuntimeMode,
+    expected, model, apiBase, apiKey, reasoning, advanced,
+  } = opts;
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
   const history = chatHistory.get(conversationKey) || [];
@@ -2243,27 +2238,34 @@ export async function retryLatestAssistantResponse(
  * Truncates all subsequent turns from memory and storage, updates the
  * user message text, then retries using the currently selected model.
  */
-export async function editUserTurnAndRetry(
-  body: Element,
-  item: Zotero.Item,
-  userTimestamp: number,
-  assistantTimestamp: number,
-  newText: string,
-  selectedTexts?: string[],
-  selectedTextSources?: SelectedTextSource[],
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[],
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
-  screenshotImages?: string[],
-  paperContexts?: PaperContextRef[],
-  fullTextPaperContexts?: PaperContextRef[],
-  attachments?: ChatAttachment[],
-  targetRuntimeMode?: ChatRuntimeMode,
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-): Promise<void> {
+export async function editUserTurnAndRetry(opts: {
+  body: Element;
+  item: Zotero.Item;
+  userTimestamp: number;
+  assistantTimestamp: number;
+  newText: string;
+  selectedTexts?: string[];
+  selectedTextSources?: SelectedTextSource[];
+  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
+  screenshotImages?: string[];
+  paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
+  attachments?: ChatAttachment[];
+  targetRuntimeMode?: ChatRuntimeMode;
+  model?: string;
+  apiBase?: string;
+  apiKey?: string;
+  reasoning?: LLMReasoningConfig;
+  advanced?: AdvancedModelParams;
+}): Promise<void> {
+  const {
+    body, item, userTimestamp, assistantTimestamp, newText,
+    selectedTexts, selectedTextSources, selectedTextPaperContexts,
+    selectedTextNoteContexts, screenshotImages, paperContexts,
+    fullTextPaperContexts, attachments, targetRuntimeMode,
+    model, apiBase, apiKey, reasoning, advanced,
+  } = opts;
   await ensureConversationLoaded(item);
   const conversationKey = getConversationKey(item);
   const history = chatHistory.get(conversationKey) || [];
@@ -2576,78 +2578,41 @@ async function retryLatestAgentResponse(
   await retryAgentTurn(body, item, model, apiBase, apiKey, reasoning, advanced, buildAgentEngineDeps());
 }
 
-async function sendAgentQuestion(
-  body: Element,
-  item: Zotero.Item,
-  question: string,
-  images?: string[],
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-  displayQuestion?: string,
-  selectedTexts?: string[],
-  selectedTextSources?: SelectedTextSource[],
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[],
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
-  paperContexts?: PaperContextRef[],
-  fullTextPaperContexts?: PaperContextRef[],
-  attachments?: ChatAttachment[],
-): Promise<void> {
-  await sendAgentTurn(
-    body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
-    displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
-    selectedTextNoteContexts,
-    paperContexts, fullTextPaperContexts, attachments,
-    buildAgentEngineDeps(),
-  );
+async function sendAgentQuestion(opts: {
+  body: Element;
+  item: Zotero.Item;
+  question: string;
+  images?: string[];
+  model?: string;
+  apiBase?: string;
+  apiKey?: string;
+  reasoning?: LLMReasoningConfig;
+  advanced?: AdvancedModelParams;
+  displayQuestion?: string;
+  selectedTexts?: string[];
+  selectedTextSources?: SelectedTextSource[];
+  selectedTextPaperContexts?: (PaperContextRef | undefined)[];
+  selectedTextNoteContexts?: (NoteContextRef | undefined)[];
+  paperContexts?: PaperContextRef[];
+  fullTextPaperContexts?: PaperContextRef[];
+  attachments?: ChatAttachment[];
+}): Promise<void> {
+  await sendAgentTurn(opts, buildAgentEngineDeps());
 }
 
-export async function sendQuestion(
-  body: Element,
-  item: Zotero.Item,
-  question: string,
-  images?: string[],
-  model?: string,
-  apiBase?: string,
-  apiKey?: string,
-  reasoning?: LLMReasoningConfig,
-  advanced?: AdvancedModelParams,
-  displayQuestion?: string,
-  selectedTexts?: string[],
-  selectedTextSources?: SelectedTextSource[],
-  selectedTextPaperContexts?: (PaperContextRef | undefined)[],
-  selectedTextNoteContexts?: (NoteContextRef | undefined)[],
-  paperContexts?: PaperContextRef[],
-  fullTextPaperContexts?: PaperContextRef[],
-  attachments?: ChatAttachment[],
-  runtimeMode: ChatRuntimeMode = "chat",
-  agentRunId?: string,
-  skipAgentDispatch = false,
-  /** Paper keys (itemId:contextItemId) sent as PDF file attachments — excluded from text pipeline. */
-  pdfModePaperKeys?: Set<string>,
-) {
+export async function sendQuestion(opts: import("./types").SendQuestionOptions) {
+  const {
+    body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
+    displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
+    selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+    runtimeMode = "chat", agentRunId, skipAgentDispatch = false, pdfModePaperKeys,
+  } = opts;
   if (runtimeMode === "agent" && !skipAgentDispatch) {
-    await sendAgentQuestion(
-      body,
-      item,
-      question,
-      images,
-      model,
-      apiBase,
-      apiKey,
-      reasoning,
-      advanced,
-      displayQuestion,
-      selectedTexts,
-      selectedTextSources,
-      selectedTextPaperContexts,
-      selectedTextNoteContexts,
-      paperContexts,
-      fullTextPaperContexts,
-      attachments,
-    );
+    await sendAgentQuestion({
+      body, item, question, images, model, apiBase, apiKey, reasoning, advanced,
+      displayQuestion, selectedTexts, selectedTextSources, selectedTextPaperContexts,
+      selectedTextNoteContexts, paperContexts, fullTextPaperContexts, attachments,
+    });
     return;
   }
   const ui = getPanelRequestUI(body);
@@ -2837,6 +2802,7 @@ export async function sendQuestion(
       history: llmHistory,
       effectiveRequestConfig,
       pdfModePaperKeys,
+      pdfUploadSystemMessages: opts.pdfUploadSystemMessages,
       setStatusSafely,
     });
     const combinedContext = contextPlan.combinedContext;

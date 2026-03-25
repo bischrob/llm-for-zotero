@@ -255,7 +255,8 @@ async function resolveOpenAlexWork(doi: string): Promise<Record<string, unknown>
       `${OA_BASE}/works/${encodedDoi}?select=${OA_SELECT},related_works,referenced_works`,
     )) as Record<string, unknown>;
     return raw ?? null;
-  } catch {
+  } catch (err) {
+    ztoolkit.log("LLM: OpenAlex DOI fetch failed", err);
     return null;
   }
 }
@@ -601,7 +602,8 @@ async function lookupCrossRefByDoi(
       displayTitle: title,
       displaySubtitle: [yearStr, authorLabel, venue].filter(Boolean).join(" · ") || undefined,
     };
-  } catch {
+  } catch (err) {
+    ztoolkit.log("LLM: CrossRef metadata fetch failed", err);
     return null;
   }
 }

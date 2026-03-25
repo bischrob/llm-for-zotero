@@ -22,6 +22,7 @@ import {
   parseDataUrl,
   readFileRefAsBase64,
 } from "./shared";
+import { resolveContentParts } from "./adapterUtils";
 
 type GeminiPart = Record<string, unknown>;
 
@@ -220,42 +221,15 @@ function resolveGeminiReasoningConfig(request: AgentRuntimeRequest) {
 }
 
 async function buildGeminiParts(message: AgentModelMessage): Promise<GeminiPart[]> {
-  if (typeof message.content === "string") {
-    return [{ text: message.content }];
-  }
-  const parts: GeminiPart[] = [];
-  for (const part of message.content) {
-    if (part.type === "text") {
-      parts.push({ text: part.text });
-      continue;
+  const resolved = await resolveContentParts(message);
+  return resolved.map((part): GeminiPart => {
+    switch (part.type) {
+      case "text": return { text: part.text };
+      case "image": return { inlineData: { mimeType: part.mimeType, data: part.base64 } };
+      case "pdf": return { inlineData: { mimeType: "application/pdf", data: part.base64 } };
+      case "file_placeholder": return { text: `[Prepared file: ${part.name}]` };
     }
-    if (part.type === "image_url") {
-      const parsed = parseDataUrl(part.image_url.url);
-      if (parsed) {
-        parts.push({
-          inlineData: {
-            mimeType: parsed.mimeType,
-            data: parsed.data,
-          },
-        });
-      } else {
-        parts.push({ text: "[image]" });
-      }
-      continue;
-    }
-    if (part.file_ref.mimeType === "application/pdf") {
-      const data = await readFileRefAsBase64(part.file_ref.storedPath);
-      parts.push({
-        inlineData: {
-          mimeType: "application/pdf",
-          data,
-        },
-      });
-    } else {
-      parts.push({ text: `[Prepared file: ${part.file_ref.name}]` });
-    }
-  }
-  return parts.length ? parts : [{ text: "" }];
+  });
 }
 
 function extractGeminiResponseParts(data: GeminiResponse): GeminiPart[] {
