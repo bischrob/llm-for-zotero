@@ -120,6 +120,7 @@ import {
   resolvePaperContextRefFromItem,
 } from "./paperAttribution";
 import { buildPaperKey } from "./pdfContext";
+import { isTextOnlyModel } from "../../providers/modelChecks";
 import {
   getActiveContextAttachmentFromTabs,
   resolveContextSourceItem,
@@ -1318,9 +1319,11 @@ async function buildContextPlanForRequest(params: {
     .join("\n\n");
   const combinedContext = [noteContext, planContext, uploadedPdfContext].filter(Boolean).join("\n\n");
 
-  // Extract MinerU figure images from the context (if applicable)
+  // Extract MinerU figure images from the context (if applicable).
+  // Skip for text-only models (e.g. DeepSeek) that reject image_url content.
+  const effectiveModel = params.effectiveRequestConfig.model || "";
   let mineruImages: string[] = [];
-  if (planContext && activeContextItem) {
+  if (planContext && activeContextItem && !isTextOnlyModel(effectiveModel)) {
     const pdfCtx = pdfTextCache.get(activeContextItem.id);
     if (pdfCtx?.sourceType === "mineru") {
       try {
@@ -2120,7 +2123,10 @@ export async function retryLatestAssistantResponse(
       return;
     }
 
-    const allImages = [...(screenshotImages || []), ...(contextPlan.mineruImages || [])];
+    // Text-only models (e.g. DeepSeek) reject image_url content — drop all images.
+    const allImages = isTextOnlyModel(effectiveRequestConfig.model || "")
+      ? []
+      : [...(screenshotImages || []), ...(contextPlan.mineruImages || [])];
     const requestParams = {
       prompt: question,
       context: combinedContext,
@@ -2891,7 +2897,10 @@ export async function sendQuestion(opts: import("./types").SendQuestionOptions) 
       return;
     }
 
-    const allSendImages = [...(images || []), ...(contextPlan.mineruImages || [])];
+    // Text-only models (e.g. DeepSeek) reject image_url content — drop all images.
+    const allSendImages = isTextOnlyModel(effectiveRequestConfig.model || "")
+      ? []
+      : [...(images || []), ...(contextPlan.mineruImages || [])];
     const requestParams = {
       prompt: question,
       context: combinedContext,

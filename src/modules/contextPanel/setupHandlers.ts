@@ -8550,6 +8550,29 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         return;
       }
     }
+    // Up-arrow prompt recall: when input is empty or cursor is at position 0,
+    // recall the last user message from the current conversation.
+    if (ke.key === "ArrowUp" && !ke.shiftKey) {
+      const cursorAtStart =
+        inputBox.selectionStart === 0 && inputBox.selectionEnd === 0;
+      if (!inputBox.value.trim() || cursorAtStart) {
+        const convKey = item ? getConversationKey(item) : null;
+        const history =
+          convKey != null ? chatHistory.get(convKey) || [] : [];
+        const lastUserMsg = [...history]
+          .reverse()
+          .find((m) => m.role === "user");
+        if (lastUserMsg?.text) {
+          e.preventDefault();
+          e.stopPropagation();
+          inputBox.value = lastUserMsg.text;
+          persistDraftInputForCurrentConversation();
+          inputBox.selectionStart = inputBox.value.length;
+          inputBox.selectionEnd = inputBox.value.length;
+          return;
+        }
+      }
+    }
     if (ke.key === "Escape" && inlineEditTarget) {
       e.preventDefault();
       e.stopPropagation();
