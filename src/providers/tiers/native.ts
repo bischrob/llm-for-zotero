@@ -1,20 +1,28 @@
 import type { ProviderCapabilities, ProviderParams } from "../types";
+import { detectProviderPreset } from "../../utils/providerPresets";
 
 /**
  * Tier 1 — Native API providers.
  *
- * OpenAI Responses API (gpt-4o, gpt-5, o-series, chatgpt), Anthropic
- * Messages API, and Gemini Native API.  These providers accept binary
- * PDF data directly in the message payload.
+ * OpenAI, Anthropic, Gemini, and Grok official endpoints.  These
+ * providers accept binary PDF data directly in the message payload
+ * (or via /v1/files upload for Responses API).
+ *
+ * Detection uses the API base URL (via provider presets) rather than
+ * model-name matching to prevent third-party relays that happen to
+ * use `responses_api` protocol from being misclassified as native.
  */
 
 export function matches(params: ProviderParams): boolean {
   const proto = (params.protocol || "").toLowerCase();
-  const m = (params.model || "").toLowerCase();
+  if (proto === "anthropic_messages" || proto === "gemini_native") return true;
+  // Only match for actual first-party provider endpoints
+  const preset = detectProviderPreset(params.apiBase || "");
   return (
-    proto === "anthropic_messages" ||
-    proto === "gemini_native" ||
-    (proto === "responses_api" && /gpt-4o|gpt-5|o[1-9]|chatgpt/.test(m))
+    preset === "openai" ||
+    preset === "gemini" ||
+    preset === "anthropic" ||
+    preset === "grok"
   );
 }
 

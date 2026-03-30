@@ -161,11 +161,9 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     );
     const primarySelectedText = selectedTexts[0] || "";
     const allSelectedPaperContexts = deps.getSelectedPaperContexts(item.id);
-    // Agent mode always uses text/MinerU pipeline — it can fetch PDF pages on demand
-    const isAgent = deps.isAgentMode();
-    const pdfModePaperContexts = isAgent
-      ? []
-      : deps.getPdfModePaperContexts(item, allSelectedPaperContexts);
+    // Agent mode uses text/MinerU pipeline by default, but if the user
+    // explicitly forced PDF mode on a paper, honour that choice.
+    const pdfModePaperContexts = deps.getPdfModePaperContexts(item, allSelectedPaperContexts);
     // Papers in PDF mode are sent as file attachments, not through the text pipeline
     const pdfModeKeySet = new Set(
       pdfModePaperContexts.map((p) => `${p.itemId}:${p.contextItemId}`),
@@ -195,34 +193,47 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           "error",
         );
       } else if (pdfSupport === "upload" && earlyProfile?.apiBase && earlyProfile?.apiKey) {
-        // Qwen/Kimi: upload PDF to provider, inject file reference as system message
-        deps.inputBox.disabled = true;
-        deps.setStatusMessage?.(`Uploading PDF to ${earlyModelName}...`, "ready");
-        for (const pc of pdfModePaperContexts) {
-          try {
-            const result = await deps.uploadPdfForProvider({
-              apiBase: earlyProfile.apiBase,
-              apiKey: earlyProfile.apiKey,
-              pdfBytes: await deps.resolvePdfBytes(pc),
-              fileName: (() => {
-                const raw = pc.attachmentTitle || pc.title || "document";
-                return /\.pdf$/i.test(raw) ? raw : `${raw}.pdf`;
-              })(),
-            });
-            if (result) {
-              pdfUploadSystemMessages.push(result.systemMessageContent);
-              deps.setStatusMessage?.(`${result.label}`, "ready");
+        // Qwen/Kimi: upload PDF to provider, inject file reference as system message.
+        // For Qwen (DashScope), only qwen-long supports PDF upload.
+        const isQwen = (earlyProfile.apiBase || "").toLowerCase().includes("dashscope");
+        const isQwenLong = /^qwen-long(?:[.-]|$)/i.test(earlyModelName);
+        if (isQwen && !isQwenLong) {
+          deps.setStatusMessage?.(
+            `Only qwen-long supports PDF upload on DashScope. Current model: ${earlyModelName}. PDF papers were skipped.`,
+            "error",
+          );
+        } else {
+          deps.inputBox.disabled = true;
+          deps.setStatusMessage?.(`Uploading PDF to ${earlyModelName}...`, "ready");
+          for (const pc of pdfModePaperContexts) {
+            try {
+              const result = await deps.uploadPdfForProvider({
+                apiBase: earlyProfile.apiBase,
+                apiKey: earlyProfile.apiKey,
+                pdfBytes: await deps.resolvePdfBytes(pc),
+                fileName: (() => {
+                  const raw = pc.attachmentTitle || pc.title || "document";
+                  return /\.pdf$/i.test(raw) ? raw : `${raw}.pdf`;
+                })(),
+              });
+              if (result) {
+                pdfUploadSystemMessages.push(result.systemMessageContent);
+                deps.setStatusMessage?.(`${result.label}`, "ready");
+              }
+            } catch (err) {
+              ztoolkit.log("LLM: PDF upload failed for", pc.contextItemId, err);
+              deps.setStatusMessage?.("PDF upload failed. Falling back to text mode.", "error");
             }
-          } catch (err) {
-            ztoolkit.log("LLM: PDF upload failed for", pc.contextItemId, err);
-            deps.setStatusMessage?.("PDF upload failed. Falling back to text mode.", "error");
           }
         }
       } else if (pdfSupport === "image_url") {
-        // Tier 3 (third-party) / Tier 5 (codex): encode full PDF as base64
-        // data URI and send as image_url — relay services pass this through.
+        // Tier 3 (third-party): encode full PDF as base64 data URI and send
+        // as image_url — relay services pass this through.
         deps.inputBox.disabled = true;
-        deps.setStatusMessage?.(`Encoding PDF for ${earlyModelName}...`, "ready");
+        deps.setStatusMessage?.(
+          `PDF upload via third-party provider may not work. Attempting base64 encoding...`,
+          "warning",
+        );
         for (const pc of pdfModePaperContexts) {
           try {
             const pdfBytes = await deps.resolvePdfBytes(pc);
@@ -244,7 +255,7 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
           );
         } else {
           deps.inputBox.disabled = true;
-          deps.setStatusMessage?.(`Rendering PDF pages as images for ${earlyModelName}...`, "ready");
+          deps.setStatusMessage?.(`PDF will be sent as page images (vision mode) for ${earlyModelName}...`, "ready");
           pdfPageImageDataUrls = await deps.renderPdfPagesAsImages(pdfModePaperContexts);
           deps.setStatusMessage?.(`Sending ${pdfPageImageDataUrls.length} page image(s)...`, "ready");
         }

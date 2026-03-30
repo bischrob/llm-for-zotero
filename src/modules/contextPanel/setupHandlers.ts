@@ -6031,6 +6031,44 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           setSelectedModelEntryForItem(item.id, entry.entryId);
           setFloatingMenuOpen(modelMenu, MODEL_MENU_OPEN_CLASS, false);
           setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, false);
+
+          // Auto-correct PDF mode for models that don't support it (e.g. Copilot,
+          // non-qwen-long Qwen models).  Downgrade to text/mineru so the user
+          // doesn't end up with a broken send.
+          const newPdfSupport = getModelPdfSupport(
+            entry.model, entry.providerProtocol, entry.authMode, entry.apiBase,
+          );
+          const shouldDowngrade =
+            newPdfSupport === "none" ||
+            (newPdfSupport === "upload" &&
+              (entry.apiBase || "").toLowerCase().includes("dashscope") &&
+              !/^qwen-long(?:[.-]|$)/i.test(entry.model));
+          if (shouldDowngrade) {
+            const papers = normalizePaperContextEntries(
+              selectedPaperContextCache.get(item.id) || [],
+            );
+            let didDowngrade = false;
+            for (const pc of papers) {
+              if (resolvePaperContentSourceMode(item.id, pc) === "pdf") {
+                const mineruAvailable = isPaperContextMineru(pc);
+                setPaperContentSourceOverride(
+                  item.id, pc, mineruAvailable ? "mineru" : "text",
+                );
+                didDowngrade = true;
+              }
+            }
+            if (didDowngrade) {
+              updatePaperPreviewPreservingScroll();
+              if (status) {
+                setStatus(
+                  status,
+                  t("PDF mode is not supported by this model. Switched to Text/MD mode."),
+                  "warning",
+                );
+              }
+            }
+          }
+
           updateModelButton();
           updateReasoningButton();
         };
@@ -9908,18 +9946,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const currentSource = resolvePaperContentSourceMode(item.id, paperContext);
       const mineruAvailable = isPaperContextMineru(paperContext);
       const nextSource = getNextContentSourceMode(currentSource, mineruAvailable);
-      // Block PDF mode in agent mode — Agent can access any PDF page on demand
+      // Warn (but allow) PDF mode in agent mode — Agent normally reads pages on demand
       if (nextSource === "pdf" && getCurrentRuntimeMode() === "agent") {
         if (status) {
-          setStatus(status, t("Agent mode reads PDF pages on demand — no need for full PDF mode."), "ready");
+          setStatus(status, t("Agent mode normally reads PDF pages on demand. Forcing full PDF mode."), "warning");
         }
-        // Skip "pdf" and advance to the next valid mode
-        const skipPdfSource = getNextContentSourceMode("pdf", mineruAvailable);
-        if (skipPdfSource !== "pdf") {
-          setPaperContentSourceOverride(item.id, paperContext, skipPdfSource);
-          updatePaperPreviewPreservingScroll();
-        }
-        return;
+        // Fall through — allow the mode change
       }
       // Block PDF mode for models that don't support it (e.g., Copilot)
       if (nextSource === "pdf") {
@@ -9931,6 +9963,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             setStatus(status, t("PDF mode is not available for this model. Use Text or MD mode."), "error");
           }
           return;
+        }
+        // Block non-qwen-long Qwen models (only qwen-long supports PDF upload on DashScope)
+        if (pdfSupport === "upload") {
+          const isQwen = (selectedProfile?.apiBase || "").toLowerCase().includes("dashscope");
+          const isQwenLong = /^qwen-long(?:[.-]|$)/i.test(modelName);
+          if (isQwen && !isQwenLong) {
+            if (status) {
+              setStatus(status, t("Only qwen-long supports PDF upload on DashScope. Use Text or MD mode."), "error");
+            }
+            return;
+          }
         }
       }
       setPaperContentSourceOverride(item.id, paperContext, nextSource);
