@@ -120,18 +120,8 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   registerReaderSelectionTracking();
   registerNoteEditingSelectionTracking(win);
 
-  // Tools menu item for standalone chat window
-  const doc = win.document;
-  const toolsMenu = doc.getElementById("menu_ToolsPopup");
-  if (toolsMenu) {
-    const menuitem = doc.createXULElement("menuitem");
-    menuitem.id = "llmforzotero-open-standalone";
-    menuitem.setAttribute("label", "LLM Chat Window");
-    menuitem.addEventListener("command", () => openStandaloneChat());
-    toolsMenu.appendChild(menuitem);
-  }
-
   // Keyboard shortcut: Ctrl/Cmd+Shift+L
+  const doc = win.document;
   const keyset = doc.getElementById("mainKeyset");
   if (keyset) {
     const key = doc.createXULElement("key");

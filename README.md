@@ -28,6 +28,7 @@ Documentation:
 
 ### 📢 Recent Updates
 
+- **Skills** — Customizable guidance files that shape how the agent handles different tasks. 9 built-in skills included, plus a portal for creating your own. See [Skills](#skills).
 - **Standalone Window Mode** — Open the LLM Assistant in its own dedicated window, separate from the Zotero reader sidebar. See [Standalone Window Mode](#standalone-window-mode).
 - **Obsidian Integration** — Write notes from your Zotero papers directly to your Obsidian vault with customizable templates. See [Obsidian Integration](#obsidian-integration).
 - **Agent Mode (beta)** — LLM-for-Zotero can now act as an autonomous agent inside your Zotero library. See [Agent Mode](#agent-mode-beta) for details.
@@ -44,6 +45,7 @@ Documentation:
 - [Features](#features)
 - [Obsidian Integration](#obsidian-integration)
 - [Agent Mode (beta)](#agent-mode-beta)
+- [Skills](#skills)
 - [WebChat Setup](#webchat-setup-chatgpt-web-sync)
 - [Codex Auth Setup](#codex-auth-setup-chatgpt-plus-subscribers)
 - [MinerU PDF Parsing](#mineru-pdf-parsing)
@@ -201,7 +203,6 @@ Customize quick-action presets to match your research workflow — predefined pr
 
 Open the LLM Assistant in its own dedicated window, separate from the Zotero reader sidebar. The standalone window gives you a full-sized chat interface with a collapsible conversation history panel on the left.
 
-- **Open via menu:** `Tools` → `LLM Chat Window`
 - **Keyboard shortcut:** `Ctrl+Shift+L` (macOS: `Cmd+Shift+L`)
 - **Paper chat & Library chat:** Switch between paper-specific and library-wide conversations using the tabs at the top.
 - **Conversation history:** Browse past conversations organized by date (Today, Yesterday, Last 7/30 days, Older) in the left sidebar.
@@ -308,6 +309,41 @@ The design philosophy is **fewer, more general tools** rather than a long list o
 </p>
 
 This is the first step for Agent Mode. The goal is a versatile agent that masters all tasks in your Zotero library.
+
+---
+
+## Skills
+
+<p align="center">
+  <img src="./assets/skills.png" alt="Screenshot of the Skills management portal" width="512" />
+</p>
+
+Skills are customizable guidance files that shape how the agent approaches different types of requests. When your message matches a skill's trigger patterns, the skill's instructions are automatically injected into the agent's prompt — guiding it to use the most efficient tools and workflows for the task.
+
+> Skills require **Agent Mode** to be enabled. They have no effect in standard chat mode.
+
+The plugin ships with **9 built-in skills** covering common research workflows:
+
+| Skill | What it guides the agent to do |
+| --- | --- |
+| `simple-paper-qa` | Answer general questions about a paper efficiently (read once, answer immediately) |
+| `evidence-based-qa` | Find specific methods, results, or evidence with targeted retrieval |
+| `analyze-figures` | Interpret figures and tables using MinerU-extracted images |
+| `compare-papers` | Compare multiple papers using batched reads and focused retrieval |
+| `library-analysis` | Summarize or analyze your entire library without context overflow |
+| `literature-review` | Conduct a structured literature review (discover, read, synthesize) |
+| `note-from-paper` | Create reading notes from papers with optional figure inclusion |
+| `note-editing` | Create and edit Zotero notes with smart defaults |
+| `write-to-obsidian` | Export notes to your Obsidian vault with metadata and citations |
+
+### Creating Custom Skills
+
+1. Open the **Standalone Window** and click the **Skills icon** in the toolbar.
+2. Click **"+ New skill"** to create a template.
+3. Edit the `id`, regex `match` patterns, and instruction body in your text editor.
+4. Save — the skill loads immediately, no restart needed.
+
+Skills are stored as Markdown files in `{ZoteroDataDir}/llm-for-zotero/skills/`. Left-click any skill to edit it; right-click for *Show in file system* or *Delete*.
 
 ---
 
@@ -438,7 +474,7 @@ When a personal API key is provided, the plugin calls the MinerU API directly (`
 - [x] Standalone window mode ([#78](https://github.com/yilewang/llm-for-zotero/issues/78))
 - [x] Obsidian integration
 - [ ] Local MinerU support
-- [ ] Customized skills
+- [x] Customized skills
 - [ ] Cross-device synchronization
 
 ---
