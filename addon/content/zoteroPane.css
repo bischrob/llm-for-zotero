@@ -1392,9 +1392,10 @@
 /* ---- Chat start page (shared layout for all modes) ---- */
 
 [data-start-page-active="true"] .llm-chat-shell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: auto;
+  margin-top: auto;
   overflow: visible;
 }
 

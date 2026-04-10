@@ -1426,6 +1426,7 @@ export function openStandaloneChat(options?: {
 
     const openSkillPopup = () => {
       skillOverlay.style.display = "flex";
+      void reloadRuntimeSkills();
       void renderSkillGrid();
     };
 

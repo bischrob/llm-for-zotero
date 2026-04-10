@@ -460,12 +460,39 @@ export function getPaperChatStartPageHtml(): string {
   `;
 }
 
+export function getNoteEditingStartPageHtml(): string {
+  if (getEffectiveLocale().startsWith("zh")) {
+    return `
+      <div class="llm-start-page">
+        <div class="llm-start-page-title">LLM-for-Zotero</div>
+        <div class="llm-start-page-subtitle">一起写笔记，让想法进化</div>
+        <div class="llm-start-page-desc">
+          <p>选中一段文字，我可以帮你<strong>重写润色</strong>。</p>
+          <p>如果是条目笔记，论文上下文会<strong>自动预加载</strong>；如果是独立笔记，那就自由发挥吧。</p>
+          <p>重写后的内容会以 <strong>diff 模式</strong>显示，让你清楚看到每处改动，帮助你越写越好。</p>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="llm-start-page">
+      <div class="llm-start-page-title">LLM-for-Zotero</div>
+      <div class="llm-start-page-subtitle">Write with me, evolve your ideas</div>
+      <div class="llm-start-page-desc">
+        <p>Select a text snippet, and I can <strong>rewrite</strong> it for you.</p>
+        <p>If it's an item note, the paper context will be <strong>automatically preloaded</strong> for you; if it's a standalone note, let's freestyle.</p>
+        <p>The rewritten note will show in <strong>diff mode</strong>, so you can see exactly what changed — helping you evolve to write better.</p>
+      </div>
+    </div>
+  `;
+}
+
 export function getStandaloneLibraryChatStartPageHtml(): string {
   if (getEffectiveLocale().startsWith("zh")) {
     return `
       <div class="llm-standalone-start-page">
         <div class="llm-start-page-title">LLM-for-Zotero Agent</div>
-        <div class="llm-start-page-subtitle">serve you and your library</div>
+        <div class="llm-start-page-subtitle">为你和你的文献库服务</div>
         <div class="llm-start-page-recommendations">
           <div class="llm-start-page-rec-title">推荐设置以获得最佳体验</div>
           <ol class="llm-start-page-rec-list">

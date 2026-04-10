@@ -1,5 +1,5 @@
 import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
-import { getWelcomeHtml, getWebChatWelcomeHtml, getStandaloneLibraryChatStartPageHtml, getPaperChatStartPageHtml } from "../../utils/i18n";
+import { getWelcomeHtml, getWebChatWelcomeHtml, getStandaloneLibraryChatStartPageHtml, getPaperChatStartPageHtml, getNoteEditingStartPageHtml } from "../../utils/i18n";
 import {
   appendMessage as appendStoredMessage,
   clearConversation as clearStoredConversation,
@@ -3483,7 +3483,11 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       chatBox.innerHTML = getWebChatWelcomeHtml(targetEntry?.label, targetEntry?.modelName);
     } else {
       const isStandalone = panelRoot?.dataset?.standalone === "true" || (body as HTMLElement).dataset?.standalone === "true";
-      if (isStandalone && isGlobalConversation) {
+      const isNoteEditing = !!resolveActiveNoteSession(item);
+      if (isNoteEditing) {
+        chatBox.innerHTML = getNoteEditingStartPageHtml();
+        if (panelRoot) panelRoot.dataset.startPageActive = "true";
+      } else if (isStandalone && isGlobalConversation) {
         chatBox.innerHTML = getStandaloneLibraryChatStartPageHtml();
         if (panelRoot) panelRoot.dataset.startPageActive = "true";
       } else {
