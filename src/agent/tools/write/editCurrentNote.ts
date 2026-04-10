@@ -3,6 +3,7 @@ import { LibraryMutationService } from "../../services/libraryMutationService";
 import { pushUndoEntry } from "../../store/undoStore";
 import type { AgentToolDefinition } from "../../types";
 import { normalizeNoteSourceText } from "../../../modules/contextPanel/notes";
+import { fileUrlToPath } from "../../../utils/pathFileUrl";
 import { ok, fail, validateObject, normalizePositiveInt } from "../shared";
 import { executeAndRecordUndo } from "./mutateLibraryShared";
 
@@ -16,9 +17,9 @@ async function importLocalImages(
   noteItemId: number,
   zoteroGateway: ZoteroGateway,
 ): Promise<string> {
-  // Match both markdown ![alt](file:///path) and HTML <img src="file:///path" />
-  const markdownPattern = /!\[([^\]]*)\]\(file:\/\/\/([^)]+)\)/g;
-  const htmlPattern = /<img\s+[^>]*src\s*=\s*"file:\/\/\/([^"]+)"[^>]*\/?>/gi;
+  // Match both markdown ![alt](file://...) and HTML <img src="file://..." />
+  const markdownPattern = /!\[([^\]]*)\]\((file:\/\/\/?[^)]+)\)/g;
+  const htmlPattern = /<img\s+[^>]*src\s*=\s*"(file:\/\/\/?[^"]+)"[^>]*\/?>/gi;
 
   let result = content;
 
@@ -27,7 +28,8 @@ async function importLocalImages(
   for (const match of mdMatches) {
     const fullMatch = match[0];
     const alt = match[1];
-    const filePath = "/" + match[2]; // restore leading /
+    const filePath = fileUrlToPath(match[2]);
+    if (!filePath) continue;
     try {
       const imported = await zoteroGateway.importNoteImage({
         imagePath: filePath,
@@ -48,7 +50,8 @@ async function importLocalImages(
   const htmlMatches = [...result.matchAll(htmlPattern)];
   for (const match of htmlMatches) {
     const fullMatch = match[0];
-    const filePath = "/" + match[1];
+    const filePath = fileUrlToPath(match[1]);
+    if (!filePath) continue;
     const altMatch = fullMatch.match(/alt\s*=\s*"([^"]*)"/i);
     const alt = altMatch?.[1] || "";
     try {
@@ -356,7 +359,7 @@ export function createEditCurrentNoteTool(
       });
     },
     execute: async (input, context) => {
-      const hasLocalImages = /!\[[^\]]*\]\(file:\/\/\/|<img\s+[^>]*src\s*=\s*"file:\/\/\//i.test(
+      const hasLocalImages = /!\[[^\]]*\]\(file:\/\/|<img\s+[^>]*src\s*=\s*"file:\/\//i.test(
         input.content,
       );
 

@@ -41,6 +41,7 @@ import {
   resolveCopilotAccessToken,
   fetchCopilotModelList,
 } from "../utils/llmClient";
+import { joinLocalPath } from "../utils/localPath";
 import {
   isMineruEnabled,
   getMineruApiKey,
@@ -301,23 +302,10 @@ function getNsIFile(): unknown {
   return components?.interfaces?.nsIFile;
 }
 
-function joinPath(...parts: string[]): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.join) return pathUtils.join(...parts);
-  return parts
-    .filter(Boolean)
-    .map((part, index) =>
-      index === 0
-        ? part.replace(/[\\/]+$/, "")
-        : part.replace(/^[\\/]+|[\\/]+$/g, ""),
-    )
-    .join(parts[0]?.includes("\\") ? "\\" : "/");
-}
-
 function resolveCodexAuthPath(): string {
   const env = getProcess()?.env;
   const codexHome = env?.CODEX_HOME?.trim();
-  if (codexHome) return joinPath(codexHome, "auth.json");
+  if (codexHome) return joinLocalPath(codexHome, "auth.json");
   const home =
     env?.HOME?.trim() ||
     env?.USERPROFILE?.trim() ||
@@ -326,7 +314,7 @@ function resolveCodexAuthPath(): string {
     getServices()?.dirsvc?.get?.("Home", getNsIFile())?.path?.trim() ||
     (Zotero as unknown as { Profile?: { dir?: string } }).Profile?.dir?.trim();
   if (!home) throw new Error("Unable to resolve home directory for codex auth");
-  return joinPath(home, ".codex", "auth.json");
+  return joinLocalPath(home, ".codex", "auth.json");
 }
 
 async function readCodexAccessToken(): Promise<string> {
@@ -1876,7 +1864,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         }
         const targetFolder = (obsTargetFolderInput?.value || "").trim();
         const fullPath = targetFolder
-          ? joinPath(vaultPath, targetFolder)
+          ? joinLocalPath(vaultPath, targetFolder)
           : vaultPath;
 
         obsTestBtn.disabled = true;
@@ -1893,7 +1881,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           if (!exists) {
             throw new Error(`Directory not found: ${fullPath}`);
           }
-          const testFile = joinPath(fullPath, ".llm-for-zotero-test");
+          const testFile = joinLocalPath(fullPath, ".llm-for-zotero-test");
           const bytes = new TextEncoder().encode("test");
           await IOUtils.write(testFile, bytes);
           await IOUtils.remove(testFile);

@@ -8,16 +8,13 @@
 import { parseSkill } from "./skillLoader";
 import type { AgentSkill } from "./skillLoader";
 import { BUILTIN_SKILL_FILES } from "./index";
+import { joinLocalPath } from "../../utils/localPath";
 
 const USER_SKILLS_DIR_NAME = "llm-for-zotero/skills";
 
 // ---------------------------------------------------------------------------
 // Gecko runtime helpers (mirrors patterns from mineruCache.ts)
 // ---------------------------------------------------------------------------
-
-type PathUtilsLike = {
-  join?: (...parts: string[]) => string;
-};
 
 type IOUtilsLike = {
   exists?: (path: string) => Promise<boolean>;
@@ -31,25 +28,8 @@ type IOUtilsLike = {
   remove?: (path: string) => Promise<void>;
 };
 
-function getPathUtils(): PathUtilsLike | undefined {
-  return (globalThis as { PathUtils?: PathUtilsLike }).PathUtils;
-}
-
 function getIOUtils(): IOUtilsLike | undefined {
   return (globalThis as unknown as { IOUtils?: IOUtilsLike }).IOUtils;
-}
-
-function joinPath(...parts: string[]): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.join) return pathUtils.join(...parts);
-  return parts
-    .filter(Boolean)
-    .map((part, index) =>
-      index === 0
-        ? part.replace(/[\\/]+$/, "")
-        : part.replace(/^[\\/]+|[\\/]+$/g, ""),
-    )
-    .join(parts[0]?.includes("\\") ? "\\" : "/");
 }
 
 function getBaseDir(): string {
@@ -67,7 +47,7 @@ function getBaseDir(): string {
 
 /** Returns the directory path where user skill files are stored. */
 export function getUserSkillsDir(): string {
-  return joinPath(getBaseDir(), "llm-for-zotero", "skills");
+  return joinLocalPath(getBaseDir(), "llm-for-zotero", "skills");
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +104,7 @@ export async function initUserSkills(): Promise<void> {
 
   for (const [filename, content] of Object.entries(BUILTIN_SKILL_FILES)) {
     if (seeded.has(filename)) continue; // already seeded once — respect user deletions
-    const filePath = joinPath(dir, filename);
+    const filePath = joinLocalPath(dir, filename);
     try {
       const exists = await io.exists(filePath);
       if (!exists) {
@@ -281,7 +261,7 @@ Describe when and how the agent should behave when this skill matches.
   // Find the next available filename
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    filePath = joinPath(dir, `custom-skill-${index}.md`);
+    filePath = joinLocalPath(dir, `custom-skill-${index}.md`);
     try {
       const exists = await io.exists(filePath);
       if (!exists) break;

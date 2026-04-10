@@ -1,12 +1,12 @@
 import { CHAT_ATTACHMENTS_DIR_NAME } from "./constants";
-import { fileUrlToPath, toFileUrl } from "../../utils/pathFileUrl";
+import {
+  fileUrlToPath,
+  getLocalParentPath,
+  joinLocalPath,
+  toFileUrl,
+} from "../../utils/localPath";
 
 export const ATTACHMENT_BLOBS_TABLE = "llm_for_zotero_attachment_blobs";
-
-type PathUtilsLike = {
-  join?: (...parts: string[]) => string;
-  parent?: (path: string) => string;
-};
 
 type IOUtilsLike = {
   exists?: (path: string) => Promise<boolean>;
@@ -42,43 +42,12 @@ type OSFileLike = {
   ) => Promise<void>;
 };
 
-function getPathUtils(): PathUtilsLike | undefined {
-  return (globalThis as { PathUtils?: PathUtilsLike }).PathUtils;
-}
-
 function getIOUtils(): IOUtilsLike | undefined {
   return (globalThis as unknown as { IOUtils?: IOUtilsLike }).IOUtils;
 }
 
 function getOSFile(): OSFileLike | undefined {
   return (globalThis as { OS?: { File?: OSFileLike } }).OS?.File;
-}
-
-function joinPath(...parts: string[]): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.join) {
-    return pathUtils.join(...parts);
-  }
-  const normalized = parts
-    .filter((part) => Boolean(part))
-    .map((part, index) =>
-      index === 0
-        ? part.replace(/[\\/]+$/, "")
-        : part.replace(/^[\\/]+|[\\/]+$/g, ""),
-    )
-    .filter((part) => Boolean(part));
-  return normalized.join(parts[0]?.includes("\\") ? "\\" : "/");
-}
-
-function getParentPath(path: string): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.parent) return pathUtils.parent(path);
-  const normalized = path.replace(/[\\/]+$/, "");
-  const index = Math.max(
-    normalized.lastIndexOf("/"),
-    normalized.lastIndexOf("\\"),
-  );
-  return index > 0 ? normalized.slice(0, index) : normalized;
 }
 
 function sanitizeFileName(name: string): string {
@@ -128,13 +97,13 @@ function getBaseWritableDir(): string {
 }
 
 export function getChatAttachmentsRootDir(): string {
-  return joinPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
+  return joinLocalPath(getBaseWritableDir(), CHAT_ATTACHMENTS_DIR_NAME);
 }
 
 async function ensureDir(path: string): Promise<void> {
   const io = getIOUtils();
   if (io?.makeDirectory) {
-    await io.makeDirectory(path, {
+      await io.makeDirectory(path, {
       createAncestors: true,
       ignoreExisting: true,
     });
@@ -142,8 +111,8 @@ async function ensureDir(path: string): Promise<void> {
   }
   const osFile = getOSFile();
   if (osFile?.makeDir) {
-    await osFile.makeDir(path, {
-      from: getParentPath(path),
+      await osFile.makeDir(path, {
+      from: getLocalParentPath(path),
       ignoreExisting: true,
     });
     return;
@@ -311,14 +280,14 @@ async function reserveUniquePath(
   while (attempt < 500) {
     const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
     const candidate = `${safeStem}${suffix}${ext}`;
-    const candidatePath = joinPath(dirPath, candidate);
+    const candidatePath = joinLocalPath(dirPath, candidate);
     if (!(await pathExists(candidatePath))) {
       return candidatePath;
     }
     attempt += 1;
   }
   const fallback = `${safeStem}-${Date.now()}${ext}`;
-  return joinPath(dirPath, fallback);
+  return joinLocalPath(dirPath, fallback);
 }
 
 let blobTableInitTask: Promise<void> | null = null;
@@ -346,7 +315,7 @@ function normalizeHash(value: unknown): string | null {
 
 function getConversationDir(conversationKey: number): string {
   const root = getChatAttachmentsRootDir();
-  return joinPath(root, "chats", String(conversationKey));
+  return joinLocalPath(root, "chats", String(conversationKey));
 }
 
 function getConversationAttachmentPath(
@@ -355,22 +324,22 @@ function getConversationAttachmentPath(
 ): string {
   const dirPath = getConversationDir(conversationKey);
   const safeName = sanitizeFileName(fileName);
-  return joinPath(dirPath, safeName);
+  return joinLocalPath(dirPath, safeName);
 }
 
 function getNoteDir(noteId: number): string {
   const root = getChatAttachmentsRootDir();
-  return joinPath(root, "notes", String(noteId));
+  return joinLocalPath(root, "notes", String(noteId));
 }
 
 function getBlobDir(contentHash: string): string {
   const root = getChatAttachmentsRootDir();
-  return joinPath(root, "blobs", contentHash);
+  return joinLocalPath(root, "blobs", contentHash);
 }
 
 function getBlobPath(contentHash: string, fileName: string): string {
   const dirPath = getBlobDir(contentHash);
-  return joinPath(dirPath, sanitizeFileName(fileName));
+  return joinLocalPath(dirPath, sanitizeFileName(fileName));
 }
 
 export function extractManagedBlobHash(storedPath: string | undefined): string {
@@ -417,7 +386,7 @@ export async function persistAttachmentBlob(
   }
   const fallbackName = sanitizeFileName(fileName || "") || `${contentHash}.bin`;
   const storedPath = existingPath || getBlobPath(contentHash, fallbackName);
-  await ensureDir(getParentPath(storedPath));
+  await ensureDir(getLocalParentPath(storedPath));
   await writeBytes(storedPath, bytes);
   await Zotero.DB.queryAsync(
     `INSERT OR REPLACE INTO ${ATTACHMENT_BLOBS_TABLE} (hash, path, size_bytes, created_at)

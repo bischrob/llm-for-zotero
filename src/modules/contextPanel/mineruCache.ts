@@ -1,12 +1,10 @@
+import { getLocalParentPath, joinLocalPath } from "../../utils/localPath";
+
 const MINERU_CACHE_DIR_NAME = "llm-for-zotero-mineru";
 
 export type MineruCacheFile = {
   relativePath: string;
   data: Uint8Array;
-};
-
-type PathUtilsLike = {
-  join?: (...parts: string[]) => string;
 };
 
 type IOUtilsLike = {
@@ -41,38 +39,12 @@ type OSFileLike = {
   ) => Promise<void>;
 };
 
-function getPathUtils(): PathUtilsLike | undefined {
-  return (globalThis as { PathUtils?: PathUtilsLike }).PathUtils;
-}
-
 function getIOUtils(): IOUtilsLike | undefined {
   return (globalThis as unknown as { IOUtils?: IOUtilsLike }).IOUtils;
 }
 
 function getOSFile(): OSFileLike | undefined {
   return (globalThis as { OS?: { File?: OSFileLike } }).OS?.File;
-}
-
-function joinPath(...parts: string[]): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.join) return pathUtils.join(...parts);
-  return parts
-    .filter(Boolean)
-    .map((part, index) =>
-      index === 0
-        ? part.replace(/[\\/]+$/, "")
-        : part.replace(/^[\\/]+|[\\/]+$/g, ""),
-    )
-    .join(parts[0]?.includes("\\") ? "\\" : "/");
-}
-
-function getParentPath(path: string): string {
-  const normalized = path.replace(/[\\/]+$/, "");
-  const index = Math.max(
-    normalized.lastIndexOf("/"),
-    normalized.lastIndexOf("\\"),
-  );
-  return index > 0 ? normalized.slice(0, index) : normalized;
 }
 
 function getBaseDir(): string {
@@ -89,26 +61,26 @@ function getBaseDir(): string {
 }
 
 export function getMineruCacheDir(): string {
-  return joinPath(getBaseDir(), MINERU_CACHE_DIR_NAME);
+  return joinLocalPath(getBaseDir(), MINERU_CACHE_DIR_NAME);
 }
 
 export function getMineruItemDir(id: number): string {
-  return joinPath(getMineruCacheDir(), String(id));
+  return joinLocalPath(getMineruCacheDir(), String(id));
 }
 
 // The md content is stored at a well-known path for quick access
 function getMineruMdPath(id: number): string {
-  return joinPath(getMineruItemDir(id), "full.md");
+  return joinLocalPath(getMineruItemDir(id), "full.md");
 }
 
 // Legacy path (pre-full.md, used _content.md as the well-known name)
 function getLegacyContentMdPath(id: number): string {
-  return joinPath(getMineruItemDir(id), "_content.md");
+  return joinLocalPath(getMineruItemDir(id), "_content.md");
 }
 
 // Legacy path (pre-directory cache)
 function getLegacyMdPath(id: number): string {
-  return joinPath(getMineruCacheDir(), `${id}.md`);
+  return joinLocalPath(getMineruCacheDir(), `${id}.md`);
 }
 
 async function ensureDir(path: string): Promise<void> {
@@ -256,8 +228,8 @@ export async function writeMineruCacheFiles(
     // Split relative path into individual components so PathUtils.join
     // doesn't reject segments containing '/'.
     const parts = file.relativePath.split(/[\\/]+/).filter(Boolean);
-    const filePath = joinPath(itemDir, ...parts);
-    const parentDir = getParentPath(filePath);
+    const filePath = joinLocalPath(itemDir, ...parts);
+    const parentDir = getLocalParentPath(filePath);
     if (parentDir !== itemDir) {
       await ensureDir(parentDir);
     }
@@ -311,7 +283,7 @@ export async function readMineruImageAsBase64(
   relativePath: string,
 ): Promise<string | null> {
   const parts = relativePath.split(/[\\/]+/).filter(Boolean);
-  const filePath = joinPath(getMineruItemDir(attachmentId), ...parts);
+  const filePath = joinLocalPath(getMineruItemDir(attachmentId), ...parts);
   const bytes = await readFileBytes(filePath);
   if (!bytes || bytes.length === 0) return null;
   const ext = (relativePath.match(/\.(\w+)$/)?.[1] || "png").toLowerCase();
@@ -355,7 +327,7 @@ export type MineruManifest = {
 };
 
 function getManifestPath(id: number): string {
-  return joinPath(getMineruItemDir(id), "manifest.json");
+  return joinLocalPath(getMineruItemDir(id), "manifest.json");
 }
 
 /** Headings that are journal/publisher metadata noise, not real sections. */
@@ -716,8 +688,8 @@ export async function cleanupLegacyContentMdFiles(): Promise<void> {
     const basename = entry.split(/[\\/]/).pop() || "";
     if (!/^\d+$/.test(basename)) continue;
 
-    const fullMdPath = joinPath(entry, "full.md");
-    const contentMdPath = joinPath(entry, "_content.md");
+    const fullMdPath = joinLocalPath(entry, "full.md");
+    const contentMdPath = joinLocalPath(entry, "_content.md");
 
     if ((await pathExists(fullMdPath)) && (await pathExists(contentMdPath))) {
       await removePath(contentMdPath);

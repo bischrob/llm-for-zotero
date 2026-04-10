@@ -36,7 +36,11 @@ import {
   resolveEndpoint,
   usesMaxCompletionTokens,
 } from "./apiHelpers";
-import { pathToFileUrl } from "./pathFileUrl";
+import {
+  getLocalParentPath,
+  joinLocalPath,
+  pathToFileUrl,
+} from "./localPath";
 import {
   normalizeTemperature,
   normalizeMaxTokens,
@@ -440,33 +444,6 @@ function coerceToBytes(data: unknown): Uint8Array | null {
   return null;
 }
 
-function getParentPath(path: string): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.parent) return pathUtils.parent(path);
-  const normalized = path.replace(/[\\/]+$/, "");
-  const index = Math.max(
-    normalized.lastIndexOf("/"),
-    normalized.lastIndexOf("\\"),
-  );
-  return index > 0 ? normalized.slice(0, index) : normalized;
-}
-
-function joinPath(...parts: string[]): string {
-  const pathUtils = getPathUtils();
-  if (pathUtils?.join) {
-    return pathUtils.join(...parts);
-  }
-  const normalized = parts
-    .filter((part) => Boolean(part))
-    .map((part, index) =>
-      index === 0
-        ? part.replace(/[\\/]+$/, "")
-        : part.replace(/^[\\/]+|[\\/]+$/g, ""),
-    )
-    .filter((part) => Boolean(part));
-  return normalized.join(parts[0]?.includes("\\") ? "\\" : "/");
-}
-
 function resolveHomeDir(): string {
   const env = getProcess()?.env;
   const envHome = env?.HOME || env?.USERPROFILE;
@@ -498,8 +475,8 @@ function resolveHomeDir(): string {
 function resolveCodexAuthPath(): string {
   const env = getProcess()?.env;
   const codexHome = env?.CODEX_HOME?.trim();
-  if (codexHome) return joinPath(codexHome, "auth.json");
-  return joinPath(resolveHomeDir(), ".codex", "auth.json");
+  if (codexHome) return joinLocalPath(codexHome, "auth.json");
+  return joinLocalPath(resolveHomeDir(), ".codex", "auth.json");
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -534,7 +511,7 @@ async function ensureDir(path: string): Promise<void> {
   const osFile = getOSFile();
   if (osFile?.makeDir) {
     await osFile.makeDir(path, {
-      from: getParentPath(path),
+      from: getLocalParentPath(path),
       ignoreExisting: true,
     });
     return;
@@ -551,7 +528,7 @@ async function readUtf8File(path: string): Promise<string> {
 async function writeUtf8File(path: string, content: string): Promise<void> {
   const encoder = new TextEncoder();
   const data = encoder.encode(content);
-  await ensureDir(getParentPath(path));
+  await ensureDir(getLocalParentPath(path));
   const io = getIOUtils();
   if (io?.write) {
     await io.write(path, data);

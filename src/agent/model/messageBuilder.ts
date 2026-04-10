@@ -16,6 +16,8 @@ import {
   getObsidianNoteTemplate,
   getDefaultObsidianNoteTemplate,
 } from "../../utils/obsidianConfig";
+import { joinLocalPath } from "../../utils/localPath";
+import { buildRuntimePlatformGuidanceText } from "../../utils/runtimePlatform";
 
 export function isMultimodalRequestSupported(
   request: AgentRuntimeRequest,
@@ -240,12 +242,14 @@ function buildObsidianConfigSection(): string {
   const attachmentsFolder = getObsidianAttachmentsFolder();
   const template =
     getObsidianNoteTemplate() || getDefaultObsidianNoteTemplate();
-  const sep = vaultPath.includes("\\") ? "\\" : "/";
+  const defaultTargetPath = targetFolder
+    ? joinLocalPath(vaultPath, targetFolder)
+    : vaultPath;
   return [
     "Obsidian configuration (user-configured):",
     `- Vault path: ${vaultPath}`,
     `- Default folder: ${targetFolder}`,
-    `- Default target path: ${vaultPath}${sep}${targetFolder}`,
+    `- Default target path: ${defaultTargetPath}`,
     `- Attachments folder: ${attachmentsFolder} (subfolder for copied figures and images)`,
     "- Note template:",
     "```",
@@ -254,6 +258,10 @@ function buildObsidianConfigSection(): string {
     "When writing to Obsidian, use Pandoc citation syntax [@citekey] for paper references. " +
       "Look up citation keys from Zotero item metadata via read_library.",
   ].join("\n");
+}
+
+function buildRuntimePlatformSection(): string {
+  return buildRuntimePlatformGuidanceText();
 }
 
 export async function buildAgentInitialMessages(
@@ -271,6 +279,10 @@ export async function buildAgentInitialMessages(
     {
       id: "persona",
       lines: AGENT_PERSONA_INSTRUCTIONS,
+    },
+    {
+      id: "runtime-platform",
+      lines: [buildRuntimePlatformSection()],
     },
     {
       id: "custom-instructions",

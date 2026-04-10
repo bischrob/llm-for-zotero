@@ -61,7 +61,7 @@ export const AGENT_PERSONA_INSTRUCTIONS: string[] = [
     "Only fall back to read_paper when mineruCacheDir is absent. " +
     "The cache directory also contains an images/ folder with extracted figure files (PNG/JPG). " +
     "To embed a figure in a Zotero note, use markdown image syntax with a file:// URL: ![Figure 1](file:///absolute/path/to/image.png). " +
-    "Do NOT use base64 encoding — just reference the file on disk. Example: ![Figure 1](file:///Users/me/Zotero/llm-for-zotero-mineru/1234/images/fig1.png).",
+    "Do NOT use base64 encoding — just reference the file on disk. Examples: ![Figure 1](file:///Users/me/Zotero/llm-for-zotero-mineru/1234/images/fig1.png) or ![Figure 1](file:///C:/Users/me/Zotero/llm-for-zotero-mineru/1234/images/fig1.png).",
   "Use query_library(entity:'tags', mode:'list') to enumerate all tags in the active library. Use query_library(entity:'libraries', mode:'list') to discover all available libraries (personal and group libraries) — use the returned libraryID when the user refers to a group library by name.",
   "You can chain multiple operations when the user's request requires it. " +
     "Multi-step examples: search for papers → import selected results → move them to a collection; " +

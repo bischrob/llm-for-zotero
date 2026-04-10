@@ -40,7 +40,7 @@ export function createImportLocalFilesTool(
             type: "array",
             items: { type: "string" },
             description:
-              "Absolute file paths to import (e.g. ['/Users/me/Desktop/paper.pdf']).",
+              "Absolute file paths to import (e.g. ['/Users/me/Desktop/paper.pdf'] or ['C:\\\\Users\\\\me\\\\Desktop\\\\paper.pdf']).",
           },
           targetCollectionId: {
             type: "number",
@@ -64,7 +64,7 @@ export function createImportLocalFilesTool(
         ),
       instruction:
         "Use import_local_files to import local files (PDFs, etc.) from the user's filesystem into Zotero. " +
-        "First use run_command to list files (e.g. ls ~/Desktop/*.pdf) to discover file paths, then call import_local_files with the paths. " +
+        "First use run_command to list files (for example `dir %USERPROFILE%\\\\Desktop\\\\*.pdf` on Windows or `ls ~/Desktop/*.pdf` on macOS/Linux) to discover file paths, then call import_local_files with the paths. " +
         "Zotero automatically retrieves metadata for recognized PDFs. " +
         "Optionally specify a targetCollectionId to organize imported items into a collection.",
     },
@@ -107,7 +107,7 @@ export function createImportLocalFilesTool(
       const filePaths = normalizeStringArray(args.filePaths);
       if (!filePaths?.length) {
         return fail(
-          "filePaths must be a non-empty array of absolute file paths, e.g. ['/Users/me/Desktop/paper.pdf']",
+          "filePaths must be a non-empty array of absolute file paths, e.g. ['/Users/me/Desktop/paper.pdf'] or ['C:\\Users\\me\\Desktop\\paper.pdf']",
         );
       }
       const operation: ImportLocalFilesOperation = {
@@ -122,7 +122,7 @@ export function createImportLocalFilesTool(
     createPendingAction(input) {
       const { operation } = input;
       const fileNames = operation.filePaths.map((p) => {
-        const parts = p.split("/");
+        const parts = p.split(/[\\/]/);
         return parts[parts.length - 1] || p;
       });
 

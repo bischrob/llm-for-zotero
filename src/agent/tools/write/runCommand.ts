@@ -6,6 +6,7 @@
  * Uses Mozilla's Subprocess module (Gecko runtime).
  */
 import type { AgentToolDefinition } from "../../types";
+import { getRuntimePlatformInfo } from "../../../utils/runtimePlatform";
 import { ok, fail, validateObject } from "../shared";
 
 type RunCommandInput = {
@@ -19,17 +20,8 @@ type RunCommandInput = {
  * Mozilla Subprocess requires an absolute path.
  */
 function resolveShellPath(): { shell: string; shellFlag: string } {
-  const isWin =
-    (Zotero as any).isWin ||
-    (typeof navigator !== "undefined" && /win/i.test(navigator.platform || ""));
-  if (isWin) {
-    const sysRoot = (globalThis as any).Services?.env?.get?.("SystemRoot") || "C:\\Windows";
-    return { shell: `${sysRoot}\\System32\\cmd.exe`, shellFlag: "/c" };
-  }
-  if ((Zotero as any).isMac) {
-    return { shell: "/bin/zsh", shellFlag: "-c" };
-  }
-  return { shell: "/bin/bash", shellFlag: "-c" };
+  const info = getRuntimePlatformInfo();
+  return { shell: info.shellPath, shellFlag: info.shellFlag };
 }
 
 /**
@@ -169,7 +161,7 @@ export function setCommandAutoApproved(conversationKey: number, value: boolean):
 }
 
 /** Patterns that indicate a command only reads data (safe to auto-approve). */
-const READ_ONLY_COMMANDS = /^\s*(?:cat|head|tail|less|more|ls|find|file|wc|du|stat|which|type|echo|printf|grep|rg|awk|sed\s+-n|sort|uniq|diff|strings|xxd|hexdump|md5|shasum|sha256sum|tesseract|swift|node\s+-e|python3?\s+[-\/])/i;
+const READ_ONLY_COMMANDS = /^\s*(?:cat|head|tail|less|more|ls|dir|find|file|wc|du|stat|which|where|type|echo|printf|grep|rg|awk|sed\s+-n|sort|uniq|diff|strings|xxd|hexdump|md5|shasum|sha256sum|tesseract|swift|node\s+-e|python3?\s+[-\/])/i;
 
 /** Patterns that indicate a command mutates state (always require confirmation). */
 const DESTRUCTIVE_COMMANDS = /(?:^|\||\;|&&)\s*(?:rm\s|rmdir\s|mv\s|cp\s|chmod\s|chown\s|sudo\s|pip\s+install|npm\s+install|brew\s+install|git\s+(?:push|reset|checkout|clean|rebase)|mkfs|dd\s)/i;
@@ -196,7 +188,7 @@ export function createRunCommandTool(): AgentToolDefinition<RunCommandInput, unk
     spec: {
       name: "run_command",
       description:
-        "Run a shell command on the local machine. The command string is passed directly to the shell (zsh on macOS, bash on Linux). " +
+        "Run a shell command on the local machine. The command string is passed directly to the native shell (cmd.exe on Windows, zsh on macOS, bash on Linux). " +
         "Use this to run analysis scripts, process data, invoke CLI tools, list files, etc. Returns stdout, stderr, and exit code.",
       inputSchema: {
         type: "object",
@@ -207,8 +199,8 @@ export function createRunCommandTool(): AgentToolDefinition<RunCommandInput, unk
             type: "string",
             description:
               "The full shell command to run, exactly as you would type it in a terminal. " +
-              "Examples: 'ls ~/Desktop/*.pdf', 'python3 /tmp/analyze.py', 'wc -l < file.txt', " +
-              "'find ~/Desktop -name \"*.pdf\" | wc -l'. Pipes, redirects, and shell features all work.",
+              "Examples: 'dir %USERPROFILE%\\\\Desktop\\\\*.pdf' (Windows), 'ls ~/Desktop/*.pdf' (macOS), 'find ~/Desktop -name \"*.pdf\"' (Linux), " +
+              "'python3 /tmp/analyze.py', 'wc -l < file.txt'. Pipes, redirects, and shell features all work.",
           },
           cwd: {
             type: "string",
@@ -232,6 +224,7 @@ export function createRunCommandTool(): AgentToolDefinition<RunCommandInput, unk
         ),
       instruction:
         "Use run_command to execute shell commands for data analysis, running scripts, or invoking external tools. " +
+        "Use native shell syntax for the current OS: for example `dir %USERPROFILE%\\\\Desktop` on Windows or `ls ~/Desktop` on macOS/Linux. " +
         "Pass the complete command as a single string — pipes, redirects, globbing, and all shell features work. " +
         "Do NOT split the command into separate command/args fields.",
     },
