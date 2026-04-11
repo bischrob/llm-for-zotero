@@ -2,7 +2,7 @@
   "name": "llm-for-zotero",
   "type": "module",
   "version": "3.7.24",
-  "description": "LLM assistant for Zotero in the reader side panel",
+  "description": "AI research agent rooted in your Zotero library",
   "config": {
     "addonName": "llm-for-zotero",
     "addonID": "zotero-llm@github.com.yilewang",
