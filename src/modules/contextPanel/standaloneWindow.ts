@@ -14,6 +14,7 @@ import {
   resolveConversationBaseItem,
   createGlobalPortalItem,
   createPaperPortalItem,
+  buildPaperStateKey,
 } from "./portalScope";
 import { getLockedGlobalConversationKey } from "./prefHelpers";
 import { applyPanelFontScale } from "./prefHelpers";
@@ -1173,7 +1174,7 @@ export function openStandaloneChat(options?: {
             const paperItemID = Number(currentBasePaperItem.id || 0);
             if (paperItemID > 0) {
               activePaperConversationByPaper.set(
-                `${Math.floor(libraryID)}:${Math.floor(paperItemID)}`,
+                buildPaperStateKey(libraryID, paperItemID),
                 activeConversationKey,
               );
             }

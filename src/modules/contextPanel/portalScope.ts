@@ -293,7 +293,7 @@ export function resolveConversationBaseItem(
   return targetItem?.isRegularItem?.() ? targetItem : null;
 }
 
-function buildPaperStateKey(libraryID: number, paperItemID: number): string {
+export function buildPaperStateKey(libraryID: number, paperItemID: number): string {
   return `${Math.floor(libraryID)}:${Math.floor(paperItemID)}`;
 }
 
