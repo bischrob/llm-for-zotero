@@ -4,6 +4,7 @@ import {
   activeContextPanelRawItems,
   activeContextPanelStateSync,
   activeGlobalConversationByLibrary,
+  activePaperConversationByPaper,
 } from "./state";
 import {
   resolveActiveLibraryID,
@@ -1164,6 +1165,20 @@ export function openStandaloneChat(options?: {
         try {
           activeItem = item;
           activeConversationKey = getConversationKey(item);
+
+          // Pre-seed the shared paper conversation state so that
+          // resolveInitialPanelItemState inside setupHandlers resolves to the
+          // same conversation the caller explicitly targeted.
+          if (standaloneMode === "paper" && currentBasePaperItem) {
+            const paperItemID = Number(currentBasePaperItem.id || 0);
+            if (paperItemID > 0) {
+              activePaperConversationByPaper.set(
+                `${Math.floor(libraryID)}:${Math.floor(paperItemID)}`,
+                activeConversationKey,
+              );
+            }
+          }
+
           clearContent();
           updateContentTitle();
 

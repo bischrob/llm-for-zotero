@@ -6758,9 +6758,16 @@ export function setupHandlers(
   if (isNoteSession()) {
     void refreshGlobalHistoryHeader();
   } else if (isPaperMode()) {
-    void switchPaperConversation().catch((err) => {
-      ztoolkit.log("LLM: Failed to restore paper conversation session", err);
-    });
+    // In the standalone window, mountChatPanel's own async IIFE handles
+    // conversation loading.  The parameter-less auto-fire would race with it
+    // and resolve to a different (default) conversation, overwriting the
+    // explicitly targeted one.
+    const isStandalone = panelRoot.dataset.standalone === "true";
+    if (!isStandalone) {
+      void switchPaperConversation().catch((err) => {
+        ztoolkit.log("LLM: Failed to restore paper conversation session", err);
+      });
+    }
   } else {
     void refreshGlobalHistoryHeader();
   }
