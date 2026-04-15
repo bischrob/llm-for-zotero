@@ -44,7 +44,7 @@
   overflow: hidden;
   overflow-anchor: none;
   position: relative;
-  padding: 5px;
+  padding: 2px;
   box-sizing: border-box;
   color: var(--fill-primary);
   background: var(--material-sidepane);
@@ -1387,7 +1387,7 @@
 [data-standalone="true"].llm-panel {
   max-width: 820px;
   margin: 0 auto;
-  padding: 5px 24px;
+  padding: 5px 12px;
 }
 
 /* ---- Chat start page (shared layout for all modes) ---- */
