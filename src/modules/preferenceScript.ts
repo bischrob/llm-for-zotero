@@ -54,6 +54,10 @@ import {
   setGlobalAutoParseEnabled,
   getMineruExcludePatterns,
   setMineruExcludePatterns,
+  isMineruStoreOutputInNotesEnabled,
+  setMineruStoreOutputInNotesEnabled,
+  isMineruUpdateExistingNotesEnabled,
+  setMineruUpdateExistingNotesEnabled,
 } from "../utils/mineruConfig";
 import {
   getNotesDirectoryPath,
@@ -2330,10 +2334,35 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const mineruGlobalAutoParseInput = doc.querySelector(
     `#${config.addonRef}-mineru-global-auto-parse`,
   ) as HTMLInputElement | null;
+  const mineruStoreNotesInput = doc.querySelector(
+    `#${config.addonRef}-mineru-store-notes`,
+  ) as HTMLInputElement | null;
+  const mineruUpdateNotesInput = doc.querySelector(
+    `#${config.addonRef}-mineru-update-notes`,
+  ) as HTMLInputElement | null;
   if (mineruGlobalAutoParseInput) {
     mineruGlobalAutoParseInput.checked = isGlobalAutoParseEnabled();
     mineruGlobalAutoParseInput.addEventListener("change", () => {
       setGlobalAutoParseEnabled(mineruGlobalAutoParseInput.checked);
+    });
+  }
+  if (mineruStoreNotesInput) {
+    const syncUpdateNoteCheckboxState = () => {
+      if (mineruUpdateNotesInput) {
+        mineruUpdateNotesInput.disabled = !mineruStoreNotesInput.checked;
+      }
+    };
+    mineruStoreNotesInput.checked = isMineruStoreOutputInNotesEnabled();
+    syncUpdateNoteCheckboxState();
+    mineruStoreNotesInput.addEventListener("change", () => {
+      setMineruStoreOutputInNotesEnabled(mineruStoreNotesInput.checked);
+      syncUpdateNoteCheckboxState();
+    });
+  }
+  if (mineruUpdateNotesInput) {
+    mineruUpdateNotesInput.checked = isMineruUpdateExistingNotesEnabled();
+    mineruUpdateNotesInput.addEventListener("change", () => {
+      setMineruUpdateExistingNotesEnabled(mineruUpdateNotesInput.checked);
     });
   }
 
