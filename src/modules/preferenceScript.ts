@@ -2347,16 +2347,16 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     });
   }
   if (mineruStoreNotesInput) {
-    const syncUpdateToggle = () => {
+    const syncUpdateNoteCheckboxState = () => {
       if (mineruUpdateNotesInput) {
         mineruUpdateNotesInput.disabled = !mineruStoreNotesInput.checked;
       }
     };
     mineruStoreNotesInput.checked = isMineruStoreOutputInNotesEnabled();
-    syncUpdateToggle();
+    syncUpdateNoteCheckboxState();
     mineruStoreNotesInput.addEventListener("change", () => {
       setMineruStoreOutputInNotesEnabled(mineruStoreNotesInput.checked);
-      syncUpdateToggle();
+      syncUpdateNoteCheckboxState();
     });
   }
   if (mineruUpdateNotesInput) {

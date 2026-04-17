@@ -5,6 +5,19 @@ import {
 
 const MINERU_NOTE_MARKER = "LLM_FOR_ZOTERO_MINERU_NOTE_V1";
 const MINERU_MODEL_VERSION = "pipeline";
+const FNV1A_32_OFFSET_BASIS = 0x811c9dc5;
+const FNV1A_32_PRIME = 0x01000193;
+const MINERU_NOTE_HEADER_PATTERN = new RegExp(
+  [
+    `${MINERU_NOTE_MARKER}\\s*[\\r\\n]+`,
+    "attachment_id=(\\d+)\\s*[\\r\\n]+",
+    "parent_item_id=(\\d+|none)\\s*[\\r\\n]+",
+    "parsed_at=[^\\r\\n]+\\s*[\\r\\n]+",
+    "mineru_version=[^\\r\\n]+\\s*[\\r\\n]+",
+    "content_hash=([a-f0-9]{8,64})",
+  ].join(""),
+  "i",
+);
 
 type MineruNoteHeader = {
   attachmentId: number;
@@ -42,13 +55,11 @@ function toTextContent(noteHtml: string): string {
   } catch {
     /* ignore */
   }
-  return noteHtml.replace(/<[^>]+>/g, "\n");
+  return noteHtml;
 }
 
 function parseMineruNoteHeader(noteText: string): MineruNoteHeader | null {
-  const match = noteText.match(
-    /LLM_FOR_ZOTERO_MINERU_NOTE_V1\s*[\r\n]+attachment_id=(\d+)\s*[\r\n]+parent_item_id=(\d+|none)\s*[\r\n]+parsed_at=[^\r\n]+\s*[\r\n]+mineru_version=[^\r\n]+\s*[\r\n]+content_hash=([a-f0-9]{8,64})/i,
-  );
+  const match = noteText.match(MINERU_NOTE_HEADER_PATTERN);
   if (!match) return null;
   const attachmentId = Number(match[1]);
   const parentRaw = match[2];
@@ -91,10 +102,10 @@ function renderMineruNoteHtml(text: string): string {
 }
 
 function fnv1aHash32(input: string): string {
-  let hash = 0x811c9dc5;
+  let hash = FNV1A_32_OFFSET_BASIS;
   for (let i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+    hash = Math.imul(hash, FNV1A_32_PRIME);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
