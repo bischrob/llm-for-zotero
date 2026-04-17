@@ -54,10 +54,13 @@ function parseMineruNoteHeader(noteText: string): MineruNoteHeader | null {
   const parentRaw = match[2];
   const contentHash = (match[3] || "").toLowerCase();
   if (!Number.isFinite(attachmentId) || attachmentId <= 0) return null;
-  const parentItemId =
-    parentRaw === "none" ? null : Number.isFinite(Number(parentRaw))
-      ? Number(parentRaw)
+  let parentItemId: number | null = null;
+  if (parentRaw !== "none") {
+    const parsedParent = Number.parseInt(parentRaw, 10);
+    parentItemId = Number.isFinite(parsedParent) && parsedParent > 0
+      ? parsedParent
       : null;
+  }
   return { attachmentId, parentItemId, contentHash };
 }
 
@@ -131,7 +134,18 @@ async function findExistingMineruNote(
   parentItemId: number | null,
   libraryID: number,
 ): Promise<Zotero.Item | null> {
-  const candidateIds = await searchCandidateMineruNotes(libraryID);
+  let candidateIds: number[] = [];
+  if (parentItemId && parentItemId > 0) {
+    const parentItem = Zotero.Items.get(parentItemId);
+    if (parentItem?.isRegularItem?.()) {
+      candidateIds = (parentItem.getNotes?.() || [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+    }
+  }
+  if (!candidateIds.length) {
+    candidateIds = await searchCandidateMineruNotes(libraryID);
+  }
   if (!candidateIds.length) return null;
 
   const matches: Array<{ note: Zotero.Item; sameParent: boolean }> = [];
@@ -194,4 +208,3 @@ export async function persistMineruNote(
   note.setNote(noteHtml);
   await note.saveTx();
 }
-
