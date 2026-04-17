@@ -1457,13 +1457,13 @@ export async function parsePdfWithMineruCloud(
       report(
         `Oversize detected → splitting into chunks of ${pagesPerChunk} pages…`,
       );
-      // Read bytes if we didn't already
+      // Read bytes if we didn't already; if still unavailable, bail out
       if (!pdfBytes || !pdfBytes.length) {
         pdfBytes = await readPdfBytes(pdfPath);
-      }
-      if (!pdfBytes || !pdfBytes.length) {
-        report("PDF file is empty or unreadable");
-        return null;
+        if (!pdfBytes || !pdfBytes.length) {
+          report("PDF file is empty or unreadable");
+          return null;
+        }
       }
       return parsePdfWithSplit(
         pdfPath,

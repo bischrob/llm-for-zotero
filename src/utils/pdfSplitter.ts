@@ -283,9 +283,8 @@ export async function findPdfSplitTool(
 
   for (const { tool, paths } of candidates) {
     for (const binaryPath of paths) {
-      const versionArg = tool === "pdftk" ? "--version" : "--version";
       const run = runProcessFactory(binaryPath);
-      if (await probeCommand(run, binaryPath, versionArg)) {
+      if (await probeCommand(run, binaryPath, "--version")) {
         return { tool, binaryPath };
       }
     }
