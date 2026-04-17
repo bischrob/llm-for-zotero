@@ -5,6 +5,19 @@ import {
   type MinerUZipFile,
   type MinerUZipInspectionResult,
 } from "./mineruZip";
+import {
+  isMineruAutoSplitEnabled,
+  getMineruSplitPagesPerChunk,
+} from "./mineruConfig";
+import {
+  extractPdfPageCount,
+  isMineruOversizeError,
+  computeChunkRanges,
+  buildSplitArgs,
+  findPdfSplitTool,
+  mergeSplitChunkResults,
+  type SplitChunkResult,
+} from "./pdfSplitter";
 
 const MINERU_DIRECT_API_BASE = "https://mineru.net/api/v4";
 const MINERU_PROXY_API_BASE =
@@ -46,6 +59,13 @@ export class MineruCancelledError extends Error {
   constructor() {
     super("Cancelled");
     this.name = "MineruCancelledError";
+  }
+}
+
+export class MineruOversizeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MineruOversizeError";
   }
 }
 
@@ -920,6 +940,12 @@ async function parsePdfViaUpload(
     if (/rate.?limit|quota|exceeded|limit.*reached/i.test(respMsg)) {
       throw new MineruRateLimitError(`MinerU rate limit: ${respMsg}`);
     }
+    if (isMineruOversizeError(batchResult.status, respMsg)) {
+      throw new MineruOversizeError(
+        respMsg ||
+          `MinerU rejected the file as too large (HTTP ${batchResult.status})`,
+      );
+    }
     report(`Batch request failed: HTTP ${batchResult.status}`);
     return null;
   }
@@ -954,6 +980,11 @@ async function parsePdfViaUpload(
         return fileUrls[0].slice(0, 80);
       }
     })();
+    if (isMineruOversizeError(uploadResult.status, "")) {
+      throw new MineruOversizeError(
+        `Upload rejected: HTTP ${uploadResult.status} (file too large for ${uploadHost})`,
+      );
+    }
     report(`Upload failed: HTTP ${uploadResult.status} to ${uploadHost}`);
     return null;
   }
@@ -1015,6 +1046,349 @@ async function parsePdfViaUpload(
   return null;
 }
 
+// ── Auto-split helpers ────────────────────────────────────────────────────────
+
+/**
+ * Run an arbitrary binary (similar to runCurl but with a user-supplied path).
+ * Returns the exit code, or -1 on failure/timeout.
+ */
+async function runBinary(
+  binaryPath: string,
+  args: string[],
+  timeoutMs = 300000,
+): Promise<number> {
+  // Try Subprocess.call first — suppresses console window on Windows
+  const Subprocess = getSubprocess();
+  if (Subprocess?.call) {
+    try {
+      const proc = await Subprocess.call({
+        command: binaryPath,
+        arguments: args,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const drain = async (pipe: any) => {
+        if (!pipe?.readString) return;
+        try {
+          while (await pipe.readString()) {
+            /* discard */
+          }
+        } catch {
+          /* pipe closed */
+        }
+      };
+      const resultPromise = (async () => {
+        await Promise.all([drain(proc.stdout), drain(proc.stderr)]);
+        const { exitCode } = await proc.wait();
+        return exitCode as number;
+      })();
+      const race = await Promise.race([
+        resultPromise,
+        new Promise<"timeout">((r) =>
+          setTimeout(() => r("timeout"), timeoutMs),
+        ),
+      ]);
+      if (race === "timeout") {
+        try {
+          proc.kill();
+        } catch {
+          /* ignore */
+        }
+        return -1;
+      }
+      return race;
+    } catch {
+      /* fall through to nsIProcess */
+    }
+  }
+
+  // Fallback: nsIProcess
+  try {
+    const Cc = (
+      globalThis as {
+        Components?: {
+          classes?: Record<
+            string,
+            { createInstance: (iface: unknown) => unknown }
+          >;
+        };
+      }
+    ).Components?.classes;
+    const Ci = (
+      globalThis as { Components?: { interfaces?: Record<string, unknown> } }
+    ).Components?.interfaces;
+    if (!Cc || !Ci) return -1;
+
+    const localFile = Cc["@mozilla.org/file/local;1"]?.createInstance(
+      Ci.nsIFile as unknown,
+    ) as
+      | { initWithPath?: (path: string) => void; exists?: () => boolean }
+      | undefined;
+    if (!localFile?.initWithPath) return -1;
+    localFile.initWithPath(binaryPath);
+    if (localFile.exists && !localFile.exists()) return -1;
+
+    const process = Cc["@mozilla.org/process/util;1"]?.createInstance(
+      Ci.nsIProcess as unknown,
+    ) as
+      | {
+          init?: (executable: unknown) => void;
+          run?: (blocking: boolean, args: string[], count: number) => void;
+          runAsync?: (args: string[], count: number, observer: unknown) => void;
+          exitValue?: number;
+        }
+      | undefined;
+    if (!process?.init) return -1;
+    process.init(localFile);
+
+    if (!process.runAsync) {
+      process.run?.(true, args, args.length);
+      return process.exitValue ?? -1;
+    }
+
+    return new Promise<number>((resolve) => {
+      const observer = {
+        observe(_subject: unknown, topic: string) {
+          resolve(
+            topic === "process-finished" ? (process.exitValue ?? -1) : -1,
+          );
+        },
+        QueryInterface: () => observer,
+      };
+      process.runAsync!(args, args.length, observer);
+    });
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Get the system temp directory path.
+ */
+function getTempDir(): string | null {
+  try {
+    const Cc = (
+      globalThis as {
+        Components?: {
+          classes?: Record<
+            string,
+            { getService?: (iface: unknown) => unknown }
+          >;
+        };
+      }
+    ).Components?.classes;
+    const Ci = (
+      globalThis as { Components?: { interfaces?: Record<string, unknown> } }
+    ).Components?.interfaces;
+    if (!Cc || !Ci) return null;
+    const dirService = (
+      Cc["@mozilla.org/file/directory_service;1"] as unknown as {
+        getService?: (iface: unknown) => {
+          get?: (prop: string, iface: unknown) => { path?: string };
+        };
+      }
+    )?.getService?.(Ci.nsIProperties as unknown);
+    return dirService?.get?.("TmpD", Ci.nsIFile as unknown)?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove a temporary file (best-effort, swallows errors).
+ */
+async function removeTempFile(path: string): Promise<void> {
+  try {
+    const ioFull = (
+      globalThis as unknown as {
+        IOUtils?: { remove?: (path: string) => Promise<void> };
+      }
+    ).IOUtils;
+    await ioFull?.remove?.(path);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Parse a single PDF chunk (a temp file for a specific page range) via MinerU
+ * and return a SplitChunkResult on success, or null on failure.
+ */
+async function parseChunkWithMineruCloud(
+  chunkPath: string,
+  startPage: number,
+  endPage: number,
+  apiKey: string,
+  report: (s: string) => void,
+  signal: AbortSignal | undefined,
+): Promise<SplitChunkResult | null> {
+  try {
+    const result = await parsePdfViaUpload(chunkPath, apiKey, report, signal);
+    if (!result) return null;
+    return {
+      startPage,
+      endPage,
+      mdContent: result.mdContent,
+      files: result.files,
+    };
+  } catch (e) {
+    if (e instanceof MineruCancelledError) throw e;
+    if (e instanceof MineruRateLimitError) throw e;
+    ztoolkit.log(
+      `MinerU split: chunk pages ${startPage}-${endPage} failed: ${(e as Error).message}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Parse a large PDF by splitting it into page-range chunks, parsing each chunk
+ * via MinerU, then merging the results.
+ *
+ * Returns null if splitting is not possible (no tool available, page count
+ * unknown, or all chunks failed).  Throws MineruCancelledError /
+ * MineruRateLimitError as usual.
+ *
+ * @param pdfPath      Path to the original PDF.
+ * @param pdfBytes     Raw bytes of the PDF (already read by the caller).
+ * @param apiKey       MinerU API key (may be empty = community proxy).
+ * @param report       Progress callback.
+ * @param signal       AbortSignal for cancellation.
+ * @param pagesPerChunk Number of pages per split chunk.
+ */
+async function parsePdfWithSplit(
+  pdfPath: string,
+  pdfBytes: Uint8Array,
+  apiKey: string,
+  report: (s: string) => void,
+  signal: AbortSignal | undefined,
+  pagesPerChunk: number,
+): Promise<MinerUResult> {
+  // 1. Get page count
+  const totalPages = extractPdfPageCount(pdfBytes);
+  if (!totalPages || totalPages <= 0) {
+    report("Auto-split: cannot determine page count — skipping split");
+    return null;
+  }
+
+  if (totalPages <= pagesPerChunk) {
+    // Document is small enough for a single request; don't split
+    report(
+      `Auto-split: PDF has ${totalPages} pages (≤ ${pagesPerChunk} per chunk) — not splitting`,
+    );
+    return null;
+  }
+
+  // 2. Find a split tool
+  const runProcessFactory =
+    (binaryPath: string) => (args: string[], timeoutMs?: number) =>
+      runBinary(binaryPath, args, timeoutMs);
+
+  const toolResult = await findPdfSplitTool(runProcessFactory);
+  if (!toolResult) {
+    report(
+      `Auto-split requires pdftk, ghostscript (gs), or qpdf to be installed. ` +
+        `Please install one of these tools or manually split the PDF into files of ≤ ${pagesPerChunk} pages.`,
+    );
+    return null;
+  }
+
+  ztoolkit.log(
+    `MinerU auto-split: using ${toolResult.tool} (${toolResult.binaryPath}), ` +
+      `${totalPages} pages → chunks of ${pagesPerChunk}`,
+  );
+
+  // 3. Compute page ranges
+  const ranges = computeChunkRanges(totalPages, pagesPerChunk);
+  const tempDir = getTempDir();
+  if (!tempDir) {
+    report("Auto-split: cannot resolve temp directory");
+    return null;
+  }
+  const sep = tempDir.includes("\\") ? "\\" : "/";
+
+  const successfulChunks: SplitChunkResult[] = [];
+  const failedRanges: string[] = [];
+
+  // 4. Process each chunk
+  for (let i = 0; i < ranges.length; i++) {
+    throwIfAborted(signal);
+    const { startPage, endPage } = ranges[i];
+    const chunkNum = i + 1;
+    const chunkTotal = ranges.length;
+
+    report(
+      `Auto-split: processing chunk ${chunkNum}/${chunkTotal} (pages ${startPage}–${endPage})…`,
+    );
+
+    const chunkPath = `${tempDir}${sep}mineru_chunk_${Date.now()}_${i}.pdf`;
+
+    let splitOk = false;
+    try {
+      const splitArgs = buildSplitArgs(
+        toolResult.tool,
+        pdfPath,
+        startPage,
+        endPage,
+        chunkPath,
+      );
+      const exitCode = await runBinary(
+        toolResult.binaryPath,
+        splitArgs,
+        120000,
+      );
+      splitOk = exitCode === 0;
+    } catch {
+      splitOk = false;
+    }
+
+    if (!splitOk) {
+      ztoolkit.log(
+        `MinerU auto-split: ${toolResult.tool} failed for pages ${startPage}-${endPage}`,
+      );
+      failedRanges.push(`${startPage}–${endPage}`);
+      await removeTempFile(chunkPath);
+      continue;
+    }
+
+    try {
+      const chunkResult = await parseChunkWithMineruCloud(
+        chunkPath,
+        startPage,
+        endPage,
+        apiKey,
+        (stage) => report(`[chunk ${chunkNum}/${chunkTotal}] ${stage}`),
+        signal,
+      );
+
+      if (chunkResult) {
+        successfulChunks.push(chunkResult);
+      } else {
+        failedRanges.push(`${startPage}–${endPage}`);
+      }
+    } finally {
+      await removeTempFile(chunkPath);
+    }
+  }
+
+  if (!successfulChunks.length) {
+    report("Auto-split: all chunks failed");
+    return null;
+  }
+
+  if (failedRanges.length) {
+    report(
+      `Auto-split: merged ${successfulChunks.length}/${ranges.length} chunks ` +
+        `(failed pages: ${failedRanges.join(", ")})`,
+    );
+  } else {
+    report(
+      `Auto-split: merged ${successfulChunks.length} chunk(s) successfully`,
+    );
+  }
+
+  return mergeSplitChunkResults(successfulChunks);
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function parsePdfWithMineruCloud(
@@ -1027,11 +1401,80 @@ export async function parsePdfWithMineruCloud(
     ztoolkit.log(`MinerU: ${stage}`);
     onProgress?.(stage);
   };
+
+  // ── Pre-upload oversize check ──────────────────────────────────────────────
+  // Read the PDF bytes once here so we can inspect page count before uploading,
+  // avoiding a round-trip to MinerU when we already know the file is too large.
+  let pdfBytes: Uint8Array | null = null;
+
+  const autoSplit = isMineruAutoSplitEnabled();
+  const pagesPerChunk = getMineruSplitPagesPerChunk();
+
+  if (autoSplit) {
+    try {
+      pdfBytes = await readPdfBytes(pdfPath);
+    } catch {
+      /* ignore — parsePdfViaUpload will read it again */
+    }
+
+    if (pdfBytes && pdfBytes.length > 0) {
+      const pageCount = extractPdfPageCount(pdfBytes);
+      if (pageCount !== null && pageCount > pagesPerChunk) {
+        ztoolkit.log(
+          `MinerU: PDF has ${pageCount} pages (> ${pagesPerChunk} per chunk) — triggering auto-split`,
+        );
+        report(
+          `Oversize detected (${pageCount} pages) → splitting into chunks of ${pagesPerChunk}…`,
+        );
+        return parsePdfWithSplit(
+          pdfPath,
+          pdfBytes,
+          apiKey,
+          report,
+          signal,
+          pagesPerChunk,
+        );
+      }
+    }
+  }
+
+  // ── Normal single-file parse ──────────────────────────────────────────────
   try {
     return await parsePdfViaUpload(pdfPath, apiKey, report, signal);
   } catch (e) {
     if (e instanceof MineruRateLimitError) throw e;
     if (e instanceof MineruCancelledError) throw e;
+
+    // ── Auto-split retry on oversize error ────────────────────────────────
+    if (e instanceof MineruOversizeError) {
+      if (!autoSplit) {
+        report(
+          `PDF rejected as too large. Enable "Auto-split large PDFs" in MinerU settings, ` +
+            `or manually split the PDF into smaller files.`,
+        );
+        return null;
+      }
+      report(
+        `Oversize detected → splitting into chunks of ${pagesPerChunk} pages…`,
+      );
+      // Read bytes if we didn't already
+      if (!pdfBytes || !pdfBytes.length) {
+        pdfBytes = await readPdfBytes(pdfPath);
+      }
+      if (!pdfBytes || !pdfBytes.length) {
+        report("PDF file is empty or unreadable");
+        return null;
+      }
+      return parsePdfWithSplit(
+        pdfPath,
+        pdfBytes,
+        apiKey,
+        report,
+        signal,
+        pagesPerChunk,
+      );
+    }
+
     report(`Error: ${(e as Error).message}`);
     return null;
   }

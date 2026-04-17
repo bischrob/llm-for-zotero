@@ -587,6 +587,56 @@
               </html:span>
             </html:div>
 
+            <!-- ── Auto-Split for Large PDFs ── -->
+            <html:div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 10px 12px; background: color-mix(in srgb, currentColor 5%, Field); border: 1px solid var(--stroke-secondary, rgba(128,128,128,0.25)); border-radius: 6px;">
+              <html:span style="font-size: 12px; font-weight: 700; color: var(--fill-primary, inherit);">Auto-Split Large PDFs</html:span>
+              <html:span style="font-size: 10.5px; color: var(--fill-secondary, #888); line-height: 1.5;">
+                When a PDF is too large for a single MinerU request (e.g. a book), the plugin can automatically split it into page-range chunks, parse each chunk, and merge the results.
+                Splitting requires <html:strong>pdftk</html:strong>, <html:strong>ghostscript (gs)</html:strong>, or <html:strong>qpdf</html:strong> to be installed on your system.
+              </html:span>
+              <html:label
+                style="
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 8px;
+                  font-weight: 600;
+                  font-size: 12px;
+                  color: var(--fill-primary, inherit);
+                "
+              >
+                <html:input
+                  id="__addonRef__-mineru-auto-split"
+                  type="checkbox"
+                ></html:input>
+                Auto-split large PDFs (recommended)
+              </html:label>
+              <html:div style="display: flex; align-items: center; gap: 8px; margin-left: 24px;">
+                <html:label
+                  for="__addonRef__-mineru-split-pages"
+                  style="font-size: 11.5px; font-weight: 600; color: var(--fill-primary, inherit); white-space: nowrap;"
+                >
+                  Pages per chunk:
+                </html:label>
+                <html:input
+                  id="__addonRef__-mineru-split-pages"
+                  type="number"
+                  min="10"
+                  max="500"
+                  step="10"
+                  style="
+                    width: 70px;
+                    padding: 3px 6px;
+                    font-size: 12px;
+                    border: 1px solid var(--stroke-secondary, #c8c8c8);
+                    border-radius: 4px;
+                    background: Field;
+                    color: FieldText;
+                  "
+                ></html:input>
+                <html:span style="font-size: 10.5px; color: var(--fill-secondary, #888);">Default: 100. MinerU free tier allows ~200 pages/document.</html:span>
+              </html:div>
+            </html:div>
+
             <!-- ── Embedded MinerU manager ── -->
           <html:div style="margin-top: 8px; border-top: 1px solid var(--stroke-secondary, rgba(128,128,128,0.25)); padding-top: 12px;">
             <html:div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">

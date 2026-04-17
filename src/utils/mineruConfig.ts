@@ -6,6 +6,8 @@ const MINERU_AUTO_WATCH_KEY = `${config.prefsPrefix}.mineruAutoWatchCollections`
 const MINERU_GLOBAL_AUTO_PARSE_KEY = `${config.prefsPrefix}.mineruGlobalAutoParse`;
 const MINERU_STORE_OUTPUT_IN_NOTES_KEY = `${config.prefsPrefix}.mineruStoreOutputInNotes`;
 const MINERU_UPDATE_EXISTING_NOTES_KEY = `${config.prefsPrefix}.mineruUpdateExistingNotes`;
+const MINERU_AUTO_SPLIT_KEY = `${config.prefsPrefix}.mineruAutoSplit`;
+const MINERU_SPLIT_PAGES_PER_CHUNK_KEY = `${config.prefsPrefix}.mineruSplitPagesPerChunk`;
 
 export function isMineruEnabled(): boolean {
   const value = Zotero.Prefs.get(MINERU_ENABLED_KEY, true);
@@ -54,6 +56,43 @@ export function isMineruUpdateExistingNotesEnabled(): boolean {
 
 export function setMineruUpdateExistingNotesEnabled(value: boolean): void {
   Zotero.Prefs.set(MINERU_UPDATE_EXISTING_NOTES_KEY, value, true);
+}
+
+// ── Auto-Split Configuration ──────────────────────────────────────────────────
+
+/** Default max pages per chunk when auto-splitting. */
+export const DEFAULT_SPLIT_PAGES_PER_CHUNK = 100;
+
+/**
+ * Whether the auto-split retry should trigger when a PDF is too large for a
+ * single MinerU parse.  Defaults to true.
+ */
+export function isMineruAutoSplitEnabled(): boolean {
+  const value = Zotero.Prefs.get(MINERU_AUTO_SPLIT_KEY, true);
+  // Default to true when the preference has never been set
+  if (value === undefined || value === null) return true;
+  return value === true || `${value}`.toLowerCase() === "true";
+}
+
+export function setMineruAutoSplitEnabled(value: boolean): void {
+  Zotero.Prefs.set(MINERU_AUTO_SPLIT_KEY, value, true);
+}
+
+/**
+ * Number of pages per chunk when auto-splitting.  Must be ≥ 1.
+ */
+export function getMineruSplitPagesPerChunk(): number {
+  const raw = Zotero.Prefs.get(MINERU_SPLIT_PAGES_PER_CHUNK_KEY, true);
+  const n = typeof raw === "number" ? raw : parseInt(`${raw || ""}`, 10);
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_SPLIT_PAGES_PER_CHUNK;
+}
+
+export function setMineruSplitPagesPerChunk(value: number): void {
+  const safe =
+    Number.isFinite(value) && value >= 1
+      ? Math.floor(value)
+      : DEFAULT_SPLIT_PAGES_PER_CHUNK;
+  Zotero.Prefs.set(MINERU_SPLIT_PAGES_PER_CHUNK_KEY, safe, true);
 }
 
 // ── Auto-Watch Collections Configuration ─────────────────────────────────────

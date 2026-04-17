@@ -58,6 +58,11 @@ import {
   setMineruStoreOutputInNotesEnabled,
   isMineruUpdateExistingNotesEnabled,
   setMineruUpdateExistingNotesEnabled,
+  isMineruAutoSplitEnabled,
+  setMineruAutoSplitEnabled,
+  getMineruSplitPagesPerChunk,
+  setMineruSplitPagesPerChunk,
+  DEFAULT_SPLIT_PAGES_PER_CHUNK,
 } from "../utils/mineruConfig";
 import {
   getNotesDirectoryPath,
@@ -732,8 +737,13 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         if (nextAuthMode === "webchat") {
           group.providerProtocol = "web_sync";
           // Set default webchat model to chatgpt.com (user can change it)
-          const webchatModelNames: string[] = WEBCHAT_TARGETS.map((wt) => wt.modelName);
-          if (!group.models[0]?.model || !webchatModelNames.includes(group.models[0].model)) {
+          const webchatModelNames: string[] = WEBCHAT_TARGETS.map(
+            (wt) => wt.modelName,
+          );
+          if (
+            !group.models[0]?.model ||
+            !webchatModelNames.includes(group.models[0].model)
+          ) {
             group.models = [{ ...group.models[0], model: "chatgpt.com" }];
           }
         } else if (nextAuthMode === "codex_auth") {
@@ -758,14 +768,18 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       });
       const authModeHelperText =
         group.authMode === "webchat"
-          ? t(`Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(" / ")} via the Sync for Zotero browser extension. `
-            + "Download extension: github.com/yilewang/sync-for-zotero → Releases. "
-            + "Unzip, open chrome://extensions, enable Developer Mode, click \"Load unpacked\", select the extension folder. "
-            + "Keep the corresponding chat tab open while using WebChat mode.")
+          ? t(
+              `Relay questions to ${WEBCHAT_TARGETS.map((wt) => wt.label).join(" / ")} via the Sync for Zotero browser extension. ` +
+                "Download extension: github.com/yilewang/sync-for-zotero → Releases. " +
+                'Unzip, open chrome://extensions, enable Developer Mode, click "Load unpacked", select the extension folder. ' +
+                "Keep the corresponding chat tab open while using WebChat mode.",
+            )
           : group.authMode === "copilot_auth"
             ? t(COPILOT_API_HELPER_TEXT)
             : group.authMode === "codex_auth"
-              ? t("codex auth reuses local `codex login` credentials from ~/.codex/auth.json")
+              ? t(
+                  "codex auth reuses local `codex login` credentials from ~/.codex/auth.json",
+                )
               : "";
       authModeWrap.append(
         authModeLabel,
@@ -1303,13 +1317,20 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       if (group.authMode === "webchat") {
         // [webchat] Replace "+" with a "Fetch Models" button that adds all webchat targets
         addModelBtn.style.display = "none";
-        const fetchModelsBtn = el(doc, "button", OUTLINE_BTN_STYLE, t("Fetch Models")) as HTMLButtonElement;
+        const fetchModelsBtn = el(
+          doc,
+          "button",
+          OUTLINE_BTN_STYLE,
+          t("Fetch Models"),
+        ) as HTMLButtonElement;
         fetchModelsBtn.type = "button";
         fetchModelsBtn.style.fontSize = "11px";
         fetchModelsBtn.style.padding = "2px 8px";
         fetchModelsBtn.addEventListener("click", () => {
           const allTargets = WEBCHAT_TARGETS.map((wt) => wt.modelName);
-          const existing = new Set(group.models.map((m: { model: string }) => m.model));
+          const existing = new Set(
+            group.models.map((m: { model: string }) => m.model),
+          );
           let added = false;
           for (const target of allTargets) {
             if (!existing.has(target)) {
@@ -1400,8 +1421,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             doc,
             "select",
             "flex: 1; min-width: 0; padding: 6px 10px; font-size: 13px;" +
-            " border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 6px;" +
-            " box-sizing: border-box; background: Field; color: FieldText;",
+              " border: 1px solid var(--stroke-secondary, #c8c8c8); border-radius: 6px;" +
+              " box-sizing: border-box; background: Field; color: FieldText;",
           ) as HTMLSelectElement;
           for (const opt of validWebchatModels) {
             const option = doc.createElement("option");
@@ -1675,11 +1696,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       );
       if (group.authMode === "webchat") {
         // [webchat] Minimal layout: only auth mode + model names (webchat target selector)
-        cardBody.append(
-          authModeWrap,
-          divider,
-          modelsWrap,
-        );
+        cardBody.append(authModeWrap, divider, modelsWrap);
       } else if (group.authMode === "copilot_auth") {
         cardBody.append(
           authModeWrap,
@@ -1891,8 +1908,6 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     }
   }
 
-
-
   // ── Semantic Search settings ───────────────────────────────────
   // Follows the same toggle + sub-settings pattern as MinerU.
 
@@ -1906,7 +1921,11 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     `#${config.addonRef}-semantic-search-mount`,
   ) as HTMLDivElement | null;
 
-  if (semanticSearchToggle && semanticSearchSubSettings && semanticSearchMount) {
+  if (
+    semanticSearchToggle &&
+    semanticSearchSubSettings &&
+    semanticSearchMount
+  ) {
     const EMBEDDING_PRESETS: Record<
       string,
       {
@@ -1919,18 +1938,37 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
         apiBase: "https://api.openai.com/v1",
         defaultModel: "text-embedding-3-small",
         models: [
-          { value: "text-embedding-3-small", label: "text-embedding-3-small", pricing: "$0.02 / 1M tokens" },
-          { value: "text-embedding-3-large", label: "text-embedding-3-large", pricing: "$0.13 / 1M tokens" },
-          { value: "text-embedding-ada-002", label: "text-embedding-ada-002 (legacy)", pricing: "$0.10 / 1M tokens" },
+          {
+            value: "text-embedding-3-small",
+            label: "text-embedding-3-small",
+            pricing: "$0.02 / 1M tokens",
+          },
+          {
+            value: "text-embedding-3-large",
+            label: "text-embedding-3-large",
+            pricing: "$0.13 / 1M tokens",
+          },
+          {
+            value: "text-embedding-ada-002",
+            label: "text-embedding-ada-002 (legacy)",
+            pricing: "$0.10 / 1M tokens",
+          },
         ],
       },
       gemini: {
-        apiBase:
-          "https://generativelanguage.googleapis.com/v1beta/openai",
+        apiBase: "https://generativelanguage.googleapis.com/v1beta/openai",
         defaultModel: "gemini-embedding-001",
         models: [
-          { value: "gemini-embedding-001", label: "gemini-embedding-001", pricing: "Free tier available · $0.15 / 1M tokens" },
-          { value: "text-embedding-004", label: "text-embedding-004", pricing: "$0.10 / 1M tokens" },
+          {
+            value: "gemini-embedding-001",
+            label: "gemini-embedding-001",
+            pricing: "Free tier available · $0.15 / 1M tokens",
+          },
+          {
+            value: "text-embedding-004",
+            label: "text-embedding-004",
+            pricing: "$0.10 / 1M tokens",
+          },
         ],
       },
     };
@@ -2005,7 +2043,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       // Card header
       const cardHeader = el(doc, "div", CARD_HEADER_STYLE);
       cardHeader.appendChild(
-        el(doc, "span", "font-weight: 700; font-size: 13px;", t("Embedding Provider")),
+        el(
+          doc,
+          "span",
+          "font-weight: 700; font-size: 13px;",
+          t("Embedding Provider"),
+        ),
       );
       card.appendChild(cardHeader);
 
@@ -2064,9 +2107,7 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "div",
           "display: flex; flex-direction: column;",
         );
-        apiBaseWrap.appendChild(
-          el(doc, "label", LABEL_STYLE, t("API URL")),
-        );
+        apiBaseWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API URL")));
         const apiBaseInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
         apiBaseInput.type = "text";
         apiBaseInput.placeholder = "https://api.openai.com/v1";
@@ -2082,14 +2123,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           "div",
           "display: flex; flex-direction: column;",
         );
-        apiKeyWrap.appendChild(
-          el(doc, "label", LABEL_STYLE, t("API Key")),
-        );
-        const apiKeyInput = el(
-          doc,
-          "input",
-          INPUT_STYLE,
-        ) as HTMLInputElement;
+        apiKeyWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API Key")));
+        const apiKeyInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
         apiKeyInput.type = "password";
         apiKeyInput.value = readEmbPref("embeddingApiKey");
         apiKeyInput.addEventListener("change", () => {
@@ -2129,14 +2164,8 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
             "div",
             "display: flex; flex-direction: column;",
           );
-          apiKeyWrap.appendChild(
-            el(doc, "label", LABEL_STYLE, t("API Key")),
-          );
-          const apiKeyInput = el(
-            doc,
-            "input",
-            INPUT_STYLE,
-          ) as HTMLInputElement;
+          apiKeyWrap.appendChild(el(doc, "label", LABEL_STYLE, t("API Key")));
+          const apiKeyInput = el(doc, "input", INPUT_STYLE) as HTMLInputElement;
           apiKeyInput.type = "password";
           apiKeyInput.placeholder = "sk-…";
           apiKeyInput.value = "";
@@ -2417,6 +2446,47 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           .map((s) => s.trim())
           .filter(Boolean);
         setMineruExcludePatterns(parsed);
+      }, 500);
+    });
+  }
+
+  // ── Auto-split settings ──────────────────────────────────────────
+  const mineruAutoSplitInput = doc.querySelector(
+    `#${config.addonRef}-mineru-auto-split`,
+  ) as HTMLInputElement | null;
+  const mineruSplitPagesInput = doc.querySelector(
+    `#${config.addonRef}-mineru-split-pages`,
+  ) as HTMLInputElement | null;
+
+  if (mineruAutoSplitInput) {
+    mineruAutoSplitInput.checked = isMineruAutoSplitEnabled();
+    const updateSplitPagesDisabled = () => {
+      if (mineruSplitPagesInput) {
+        mineruSplitPagesInput.disabled = !mineruAutoSplitInput.checked;
+      }
+    };
+    updateSplitPagesDisabled();
+    mineruAutoSplitInput.addEventListener("change", () => {
+      setMineruAutoSplitEnabled(mineruAutoSplitInput.checked);
+      updateSplitPagesDisabled();
+    });
+  }
+
+  if (mineruSplitPagesInput) {
+    mineruSplitPagesInput.value = String(getMineruSplitPagesPerChunk());
+    let splitPagesTimer: ReturnType<typeof setTimeout> | null = null;
+    mineruSplitPagesInput.addEventListener("input", () => {
+      if (splitPagesTimer) clearTimeout(splitPagesTimer);
+      splitPagesTimer = setTimeout(() => {
+        const parsed = parseInt(mineruSplitPagesInput.value, 10);
+        const value =
+          Number.isFinite(parsed) && parsed >= 1
+            ? parsed
+            : DEFAULT_SPLIT_PAGES_PER_CHUNK;
+        setMineruSplitPagesPerChunk(value);
+        if (String(value) !== mineruSplitPagesInput.value) {
+          mineruSplitPagesInput.value = String(value);
+        }
       }, 500);
     });
   }
