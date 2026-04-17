@@ -19,6 +19,7 @@ import {
   setItemCached,
   setItemFailed,
 } from "./mineruProcessingStatus";
+import { persistMineruNote } from "./mineruNotes";
 
 type QueueEntry = {
   attachmentId: number;
@@ -193,6 +194,20 @@ async function processQueue(): Promise<void> {
           result.mdContent,
           result.files,
         );
+        try {
+          await persistMineruNote({
+            attachmentId: entry.attachmentId,
+            parentItemId:
+              pdfItem.parentID && pdfItem.parentID > 0 ? pdfItem.parentID : null,
+            libraryID: pdfItem.libraryID,
+            mdContent: result.mdContent,
+          });
+        } catch (noteErr) {
+          ztoolkit.log(
+            `MinerU auto-parse: failed writing note for ${entry.attachmentId}`,
+            noteErr,
+          );
+        }
         setItemCached(entry.attachmentId);
         // Flush stale in-memory text cache and disk embedding cache so the
         // next query picks up MinerU-quality chunks and re-generates embeddings.

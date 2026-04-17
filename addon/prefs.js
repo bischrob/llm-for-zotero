@@ -26,3 +26,5 @@ pref("locale", "auto");
 pref("mineruAutoWatchCollections", "");
 pref("mineruGlobalAutoParse", false);
 pref("mineruExcludePatterns", "");
+pref("mineruStoreOutputInNotes", true);
+pref("mineruUpdateExistingNotes", true);
