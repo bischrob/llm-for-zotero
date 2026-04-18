@@ -35,6 +35,8 @@ declare namespace _ZoteroTypes {
       "mineruAutoWatchCollections": string;
       "mineruGlobalAutoParse": boolean;
       "mineruExcludePatterns": string;
+      "mineruStoreOutputInNotes": boolean;
+      "mineruUpdateExistingNotes": boolean;
     };
   }
 }
