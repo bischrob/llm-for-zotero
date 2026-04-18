@@ -465,6 +465,18 @@ The plugin provides a shared community proxy so MinerU works out of the box with
 
 When a personal API key is provided, the plugin calls the MinerU API directly (`https://mineru.net/api/v4`). Without a key, it uses the community proxy.
 
+### How to automatically create MinerU Markdown notes
+
+To have MinerU automatically parse PDFs and store the output as a Zotero note:
+
+1. Open Zotero and go to `Edit` → `Preferences` → `llm-for-zotero` → `MinerU`.
+2. Enable **Auto-parse newly added items** (checkbox).
+3. Enable **Store MinerU output in Zotero notes** (checkbox).
+4. (Optional) Enable **Update existing MinerU notes (idempotent)** if you want notes to be updated when PDFs are re-parsed.
+5. Add a new PDF to your Zotero library. MinerU will automatically parse it and create a Markdown note attached to the parent item.
+
+You can monitor the parsing status and note creation in the same MinerU settings panel. No manual removal or extra steps are needed—just enable the options and add your PDFs.
+
 ---
 
 ## Roadmap
